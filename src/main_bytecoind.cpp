@@ -42,58 +42,57 @@ Options:
 
 int main(int argc, const char *argv[]) try {
 	common::console::UnicodeConsoleSetup console_setup;
-	const auto idea_start = std::chrono::high_resolution_clock::now();
+	auto idea_start = std::chrono::high_resolution_clock::now();
 	common::CommandLine cmd(argc, argv);
 	if (cmd.show_help(Config::prepare_usage(USAGE).c_str(), cn::app_version()))
 		return 0;
 
 	Config config(cmd);
 	Currency currency(config);
-
 	const std::string coin_folder = config.get_data_folder();
-	if (const char *pa = cmd.get("--backup-blockchain")) {
+	if (const char* pa = cmd.get("--backup-blockchain")) {
 		const auto backup_blockchain = platform::normalize_folder(pa);
 		if (cmd.show_errors("cannot be used with --backup-blockchain"))
 			return api::BYTECOIND_WRONG_ARGS;
 		std::cout << "Backing up " << (coin_folder + "/blockchain") << " to " << (backup_blockchain + "/blockchain")
-		          << std::endl;
+			<< std::endl;
 		if (!platform::create_folder_if_necessary(backup_blockchain + "/blockchain")) {
 			std::cout << "Could not create folder for backup " << (backup_blockchain + "/blockchain") << std::endl;
 			return 1;
 		}
 		common::console::set_text_color(common::console::BrightRed);
 		std::cout << "There will be no progress printed for 4-20 minutes, depending on your computer speed."
-		          << std::endl;
+			<< std::endl;
 		common::console::set_text_color(common::console::Default);
 		std::cout << "Starting blockchain backup..." << std::endl;
 		platform::DB::backup_db(coin_folder + "/blockchain", backup_blockchain + "/blockchain");
 		std::cout << "Finished blockchain backup." << std::endl;
 		return 0;
 	}
-	if (const char *pa = cmd.get("--export-blocks")) {
+	if (const char* pa = cmd.get("--export-blocks")) {
 		const auto export_blocks = platform::normalize_folder(pa);
-		Height max_height        = std::numeric_limits<Height>::max();
-		if (const char *pa2 = cmd.get("--max-height"))
+		Height max_height = std::numeric_limits<Height>::max();
+		if (const char* pa2 = cmd.get("--max-height"))
 			max_height = common::integer_cast<Height>(pa2);
 		if (cmd.show_errors("cannot be used with --export-blocks"))
 			return api::BYTECOIND_WRONG_ARGS;
 		logging::ConsoleLogger log_console;
 		BlockChainState block_chain_read_only(log_console, config, currency, true);
 		if (!LegacyBlockChainWriter::export_blockchain2(export_blocks + "/" + config.block_indexes_file_name,
-		        export_blocks + "/" + config.blocks_file_name, block_chain_read_only, max_height))
+			export_blocks + "/" + config.blocks_file_name, block_chain_read_only, max_height))
 			return 1;
 		return 0;
 	}
-	if (const char *pa = cmd.get("--export-sync-blocks")) {  // Experimental, for public nodes
-		const auto export_sync_blocks = platform::normalize_folder(pa);
-		if (cmd.show_errors("cannot be used with --export-sync-blocks"))
-			return api::BYTECOIND_WRONG_ARGS;
-		logging::ConsoleLogger log_console;
-		BlockChainState block_chain_read_only(log_console, config, currency, true);
-		Node::export_static_sync_blocks(block_chain_read_only, export_sync_blocks);
-		return 0;
-	}
-	if (const char *pa = cmd.get("--print-structure")) {  // Undocumented, used for debugging
+	//if (const char* pa = cmd.get("--export-sync-blocks")) {  // Experimental, for public nodes
+	//	const auto export_sync_blocks = platform::normalize_folder(pa);
+	//	if (cmd.show_errors("cannot be used with --export-sync-blocks"))
+	//		return api::BYTECOIND_WRONG_ARGS;
+	//	logging::ConsoleLogger log_console;
+	//	BlockChainState block_chain_read_only(log_console, config, currency, true);
+	//	Node::export_static_sync_blocks(block_chain_read_only, export_sync_blocks);
+	//	return 0;
+	//}
+	if (const char* pa = cmd.get("--print-structure")) {  // Undocumented, used for debugging
 		if (cmd.show_errors("cannot be used with --print-structure"))
 			return api::BYTECOIND_WRONG_ARGS;
 		logging::ConsoleLogger log_console;
@@ -101,7 +100,7 @@ int main(int argc, const char *argv[]) try {
 		block_chain_read_only.test_print_structure(common::integer_cast<Height>(pa));
 		return 0;
 	}
-	if (const char *pa = cmd.get("--dump-outputs-quality")) {  // Undocumented, used for debugging
+	if (const char* pa = cmd.get("--dump-outputs-quality")) {  // Undocumented, used for debugging
 		if (cmd.show_errors("cannot be used with --dump-outputs-quality"))
 			return api::BYTECOIND_WRONG_ARGS;
 		logging::ConsoleLogger log_console;
@@ -110,7 +109,7 @@ int main(int argc, const char *argv[]) try {
 		return 0;
 	}
 	std::string import_blocks;
-	if (const char *pa = cmd.get("--import-blocks"))
+	if (const char* pa = cmd.get("--import-blocks"))
 		import_blocks = platform::normalize_folder(pa);
 	if (cmd.show_errors())
 		return api::BYTECOIND_WRONG_ARGS;
@@ -123,27 +122,42 @@ int main(int argc, const char *argv[]) try {
 	BlockChainState block_chain(log_manager, config, currency, false);
 	if (!import_blocks.empty()) {
 		LegacyBlockChainReader::import_blockchain2(import_blocks + "/" + config.block_indexes_file_name,
-		    import_blocks + "/" + config.blocks_file_name, &block_chain);
+			import_blocks + "/" + config.blocks_file_name, &block_chain);
 		return 0;
 	}
-	//	block_chain.test_undo_everything(1790000);
+	//		block_chain.test_undo_everything(0);
+	//		return 0;
+	//	block_chain.test_print_tips();
+	//	while(block_chain.test_prune_oldest()){
+	//		block_chain.test_print_tips();
+	//	}
+
+	//	test_trezor();
 	//	return 0;
+
+	std::cout << "Thread=" << std::this_thread::get_id() << std::endl;
+
 	boost::asio::io_service io;
 	platform::EventLoop run_loop(io);
 
 	Node node(log_manager, config, block_chain);
-	const auto idea_ms =
+
+	auto idea_ms =
 	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - idea_start);
-	std::cout << "bytecoind started seconds=" << double(idea_ms.count()) / 1000 << std::endl;
-	while (!io.stopped()) {
-		if (node.on_idle())  // Using it to load blockchain
-			io.poll();
-		else
-			io.run_one();
+	std::cout << CRYPTONOTE_NAME << "d started seconds=" << double(idea_ms.count()) / 1000 << std::endl;
+	while (true) {
+		if(io.stopped())
+			std::cout << "IO stoped" << std::endl;
+		//io.dispatch([&]() {node.on_idle(); });
+		//if (node.on_idle()) {  // Using it to load blockchain
+		//	io.poll();
+		//	run_loop.poll();
+		//}else
+			//run_loop.run();
 	}
 	return 0;
 } catch (const platform::ExclusiveLock::FailedToLock &ex) {
-	std::cout << "Bytecoind already running - " << common::what(ex) << std::endl;
+	std::cout << CRYPTONOTE_NAME << "d already running - " << common::what(ex) << std::endl;
 	return api::BYTECOIND_ALREADY_RUNNING;
 } catch (const cn::Config::DataFolderError &ex) {
 	std::cout << common::what(ex) << std::endl;

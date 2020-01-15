@@ -238,6 +238,7 @@ public:
 	static EventLoop *current() { return current_loop; }
 
 	void run();  // run until cancel
+	//void poll();
 	void cancel();
 	void wake(std::function<void()> &&a_handler);
 
@@ -246,8 +247,12 @@ public:
 	boost::asio::io_service &io() { return io_service; }
 
 private:
+	void run_service(int i);
+	//void poll_service();
 	boost::asio::io_service &io_service;
-	static thread_local EventLoop *current_loop;
+	static  EventLoop *current_loop;
+	std::vector<std::thread> threads;
+	boost::asio::executor_work_guard<boost::asio::io_context::executor_type> worker;
 };
 class SafeMessage : private common::Nocopy {
 public:

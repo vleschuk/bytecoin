@@ -33,370 +33,6 @@ static std::pair<bool, std::string> split_ssl_address(const std::string &addr) {
 	}
 	return std::make_pair(ssl, stripped_addr);
 }
-#ifdef __EMSCRIPTEN__
-
-#include <emscripten/emscripten.h>
-
-class Timer::Impl {
-public:
-	explicit Impl(Timer *owner) : owner(owner), pending_wait(false) {}
-	Timer *owner;
-	bool pending_wait;
-
-	void close() {
-		if (pending_wait) {
-			owner->impl.release();  // owned by JS now
-			owner = nullptr;
-		}
-	}
-	static void static_handle_timeout(void *arg) { reinterpret_cast<Impl *>(arg)->handle_timeout(); }
-	void handle_timeout() {
-		pending_wait = false;
-		if (owner)
-			return owner->a_handler();
-		delete this;  // was owned by JS
-	}
-	void start_timer(float after_seconds) {
-		// assert(pending_wait == false);
-		pending_wait = true;
-		emscripten_async_call(static_handle_timeout, this, static_cast<int>(after_seconds * 1000));
-	}
-};
-
-Timer::Timer(after_handler &&a_handler) : a_handler(std::move(a_handler)) {}
-
-Timer::~Timer() { cancel(); }
-
-void Timer::cancel() {
-	if (impl)
-		impl->close();
-}
-
-bool Timer::is_set() const { return impl && impl->pending_wait; }
-
-void Timer::once(float after_seconds) {
-	cancel();
-	if (!impl)
-		impl = std::make_unique<Impl>(this);
-	impl->start_timer(after_seconds / get_time_multiplier_for_tests());
-}
-
-#elif platform_USE_QT
-#include <QSslSocket>
-
-// thread_local EventLoop *EventLoop::current_loop = nullptr;
-
-// EventLoop::EventLoop() {
-//	if (current_loop)
-//		throw std::logic_error("RunLoop::RunLoop Only single RunLoop per thread is allowed");
-//	current_loop = this;
-//}
-
-// EventLoop::~EventLoop() { current_loop = nullptr; }
-
-Timer::Timer(after_handler a_handler) : a_handler(std::move(a_handler)), impl(nullptr) {
-	QObject::connect(&impl, &QTimer::timeout, [this]() { this->a_handler(); });
-	impl.setSingleShot(true);
-}
-
-void Timer::cancel() { impl.stop(); }
-
-bool Timer::is_set() const { return impl.isActive(); }
-
-void Timer::once(float after_seconds) {
-	cancel();
-	impl.start(static_cast<int>(after_seconds * 1000.0f / get_time_multiplier_for_tests()));
-}
-
-SafeMessageImpl::SafeMessageImpl(SafeMessage *owner) : owner(owner) {}
-SafeMessageImpl::~SafeMessageImpl() {}
-
-void SafeMessageImpl::close() {
-	if (counter != 0) {
-		owner->impl.release();  // owned by JS now
-		owner = nullptr;
-	}
-}
-
-void SafeMessageImpl::handle_event() {
-	auto after = --counter;
-	if (owner)
-		return owner->a_handler();
-	if (after == 0)
-		delete this;  // was owned by JS
-}
-
-SafeMessage::SafeMessage(after_handler &&a_handler) : a_handler(std::move(a_handler)) {
-	impl = std::make_unique<SafeMessageImpl>(this);
-}
-
-SafeMessage::~SafeMessage() { impl->close(); }
-
-void SafeMessage::cancel() {
-	impl->close();
-	if (!impl)
-		impl = std::make_unique<SafeMessageImpl>(this);
-}
-
-void SafeMessage::fire() {
-	++impl->counter;
-	QMetaObject::invokeMethod(impl.get(), "handle_event", Qt::QueuedConnection);
-}
-
-TCPSocket::TCPSocket(RW_handler rw_handler, D_handler d_handler)
-    : rw_handler(std::move(rw_handler)), d_handler(std::move(d_handler)) {}
-
-void TCPSocket::close() {
-	if (impl) {
-		impl->deleteLater();
-		impl.release();
-	}
-	ready = false;
-}
-
-bool TCPSocket::is_open() const { return impl && impl->state() != QAbstractSocket::UnconnectedState; }
-
-bool TCPSocket::connect(const std::string &addr, uint16_t port) {
-	close();
-	//    bool sup = QSslSocket::supportsSsl();
-	//    auto vs = QSslSocket::sslLibraryVersionString(); // "BoringSSL"
-	//    auto vsv = QSslSocket::sslLibraryBuildVersionString(); // "OpenSSL 1.0.1j 15 Oct 2014"
-
-	auto ssl_addr = split_ssl_address(addr);
-
-	if (ssl_addr.first) {
-		auto s = std::make_unique<QSslSocket>();
-		QObject::connect(s.get(), static_cast<void (QSslSocket::*)(const QList<QSslError> &)>(&QSslSocket::sslErrors),
-		    [this](const QList<QSslError> &errors) {
-			    QString str;
-			    for (const auto &error : errors)
-				    str = error.errorString();
-		    });
-		QObject::connect(s.get(), &QSslSocket::encrypted, [this]() {
-			this->ready = true;
-			this->rw_handler(true, true);
-		});
-		QObject::connect(
-		    s.get(), &QSslSocket::encryptedBytesWritten, [this](qint64 bytes) { this->rw_handler(true, true); });
-		QObject::connect(s.get(), &QAbstractSocket::readyRead, [this]() { this->rw_handler(true, true); });
-		QObject::connect(s.get(), &QAbstractSocket::disconnected, [this]() {
-			this->close();
-			this->d_handler();
-		});
-		QObject::connect(s.get(),
-		    static_cast<void (QAbstractSocket::*)(QAbstractSocket::SocketError)>(&QAbstractSocket::error),
-		    [this](QAbstractSocket::SocketError err) {
-			    qDebug() << this->impl->errorString();
-			    this->close();
-			    this->d_handler();
-		    });
-		s->connectToHostEncrypted(QString::fromUtf8(ssl_addr.second.data(), ssl_addr.second.size()), port);
-		impl = std::move(s);
-	} else {
-		impl = std::make_unique<QTcpSocket>();
-		QObject::connect(
-		    impl.get(), &QAbstractSocket::bytesWritten, [this](qint64 bytes) { this->rw_handler(true, true); });
-		QObject::connect(impl.get(), &QAbstractSocket::connected, [this]() {
-			this->ready = true;
-			this->rw_handler(true, true);
-		});
-		QObject::connect(impl.get(), &QAbstractSocket::readyRead, [this]() { this->rw_handler(true, true); });
-		QObject::connect(impl.get(), &QAbstractSocket::disconnected, [this]() {
-			this->close();
-			this->d_handler();
-		});
-		QObject::connect(impl.get(),
-		    static_cast<void (QAbstractSocket::*)(QAbstractSocket::SocketError)>(&QAbstractSocket::error),
-		    [this](QAbstractSocket::SocketError err) {
-			    this->close();
-			    this->d_handler();
-		    });
-		impl->connectToHost(QString::fromUtf8(ssl_addr.second.data(), ssl_addr.second.size()), port);
-	}
-	return true;
-}
-
-size_t TCPSocket::read_some(void *val, size_t count) {
-	qint64 res = (impl && ready) ? impl->read(reinterpret_cast<char *>(val), count) : 0;
-	if (res != 0)
-		res += 0;
-	return res;
-}
-
-size_t TCPSocket::write_some(const void *val, size_t count) {
-	qint64 res = (impl && ready) ? impl->write(reinterpret_cast<const char *>(val), count) : 0;
-	return res;
-}
-
-void TCPSocket::shutdown_both() {
-	if (impl)
-		impl->disconnectFromHost();
-}
-
-#elif TARGET_OS_IPHONE
-#include <CoreFoundation/CoreFoundation.h>
-#include <sys/socket.h>
-#include "common/MemoryStreams.hpp"
-
-void Timer::static_once(CFRunLoopTimerRef impl, void *info) {
-	Timer *t = reinterpret_cast<Timer *>(info);
-	t->a_handler();
-}
-
-void Timer::cancel() {
-	if (!impl)
-		return;
-	//    CFRunLoopRemoveTimer(CFRunLoopGetCurrent(), impl, kCFRunLoopDefaultMode);
-	CFRunLoopTimerInvalidate(impl);
-	CFRelease(impl);
-	impl = nullptr;
-}
-
-bool Timer::is_set() const { return impl; }
-
-void Timer::once(float after_seconds) {
-	cancel();
-	CFRunLoopTimerContext TimerContext = {0, this, nullptr, nullptr, nullptr};
-	CFAbsoluteTime FireTime            = CFAbsoluteTimeGetCurrent() + after_seconds / get_time_multiplier_for_tests();
-	impl = CFRunLoopTimerCreate(kCFAllocatorDefault, FireTime, 0, 0, 0, &Timer::static_once, &TimerContext);
-	CFRunLoopAddTimer(CFRunLoopGetCurrent(), impl, kCFRunLoopDefaultMode);
-}
-
-void TCPSocket::close() {
-	if (read_stream) {
-		CFReadStreamClose(read_stream);
-		CFRelease(read_stream);
-		read_stream = nullptr;
-	}
-	if (write_stream) {
-		CFWriteStreamClose(write_stream);
-		CFRelease(write_stream);
-		write_stream = nullptr;
-	}
-}
-
-void TCPSocket::close_and_call() {
-	bool call = is_open();
-	close();
-	if (call)
-		d_handler();
-}
-
-bool TCPSocket::is_open() const { return read_stream || write_stream; }
-
-bool TCPSocket::connect(const std::string &addr, uint16_t port) {
-	close();
-	auto ssl_addr     = split_ssl_address(addr);
-	CFStringRef hname = CFStringCreateWithCString(kCFAllocatorDefault, ssl_addr.second.c_str(), kCFStringEncodingUTF8);
-	CFHostRef host    = CFHostCreateWithName(kCFAllocatorDefault, hname);
-	CFRelease(hname);
-	hname = nullptr;
-	CFStreamCreatePairWithSocketToCFHost(kCFAllocatorDefault, host, port, &read_stream, &write_stream);
-	CFRelease(host);
-	host = nullptr;
-	//	CFReadStreamSetProperty(read_stream, NSStreamSocketSecurityLevelKey, securityDictRef);
-	if (ssl_addr.first) {
-		CFMutableDictionaryRef security_dict_ref = CFDictionaryCreateMutable(
-		    kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-		if (!security_dict_ref) {
-			close();
-			return false;
-		}
-		CFDictionarySetValue(security_dict_ref, kCFStreamSSLValidatesCertificateChain, kCFBooleanTrue);
-		CFReadStreamSetProperty(read_stream, kCFStreamPropertySSLSettings, security_dict_ref);
-		CFRelease(security_dict_ref);
-		security_dict_ref = nullptr;
-	}
-	CFStreamClientContext my_context = {0, this, nullptr, nullptr, nullptr};
-	if (!CFReadStreamSetClient(read_stream,
-	        kCFStreamEventHasBytesAvailable | kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered,
-	        &TCPSocket::read_callback, &my_context)) {
-		close();
-		return false;
-	}
-	if (!CFWriteStreamSetClient(write_stream,
-	        kCFStreamEventCanAcceptBytes | kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered,
-	        &TCPSocket::write_callback, &my_context)) {
-		close();
-		return false;
-	}
-	CFReadStreamScheduleWithRunLoop(read_stream, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
-	CFWriteStreamScheduleWithRunLoop(write_stream, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
-	CFReadStreamOpen(read_stream);
-	CFWriteStreamOpen(write_stream);
-	return true;
-}
-
-size_t TCPSocket::read_some(void *val, size_t count) {
-	if (!read_stream || !CFReadStreamHasBytesAvailable(read_stream))
-		return 0;
-	CFIndex bytes_read = CFReadStreamRead(read_stream, reinterpret_cast<unsigned char *>(val), count);
-	if (bytes_read <= 0) {  // error or end of stream
-		return 0;
-	}
-	return bytes_read;
-}
-
-size_t TCPSocket::write_some(const void *val, size_t count) {
-	if (!write_stream || !CFWriteStreamCanAcceptBytes(write_stream))
-		return 0;
-	CFIndex bytes_written = CFWriteStreamWrite(write_stream, reinterpret_cast<unsigned char *>(val), count);
-	if (bytes_written <= 0) {  // error or end of stream
-		return 0;
-	}
-	return bytes_written;
-}
-
-void TCPSocket::shutdown_both() {
-	if (!is_open())
-		return;
-	CFDataRef da = static_cast<CFDataRef>(CFWriteStreamCopyProperty(write_stream, kCFStreamPropertySocketNativeHandle));
-	if (!da)
-		return;
-	CFSocketNativeHandle handle;
-	CFDataGetBytes(da, CFRangeMake(0, sizeof(CFSocketNativeHandle)), reinterpret_cast<unsigned char *>(&handle));
-	CFRelease(da);
-	::shutdown(handle, SHUT_RDWR);
-}
-
-void TCPSocket::read_callback(CFReadStreamRef stream, CFStreamEventType event, void *my_ptr) {
-	TCPSocket *s = reinterpret_cast<TCPSocket *>(my_ptr);
-	switch (event) {
-	case kCFStreamEventHasBytesAvailable:
-		s->rw_handler(true, true);
-		break;
-	case kCFStreamEventErrorOccurred: {
-		CFStreamError error = CFReadStreamGetError(stream);
-		if (error.domain == kCFStreamErrorDomainPOSIX) {
-		} else if (error.domain == kCFStreamErrorDomainMacOSStatus) {
-		}
-		s->close_and_call();
-		break;
-	}
-	case kCFStreamEventEndEncountered:
-		s->close_and_call();
-		break;
-	}
-}
-
-void TCPSocket::write_callback(CFWriteStreamRef stream, CFStreamEventType event, void *my_ptr) {
-	TCPSocket *s = reinterpret_cast<TCPSocket *>(my_ptr);
-	switch (event) {
-	case kCFStreamEventCanAcceptBytes:
-		s->rw_handler(true, true);
-		break;
-	case kCFStreamEventErrorOccurred:
-		s->close_and_call();
-		// CFStreamError error = CFReadStreamGetError(stream);
-		// report_error(error);
-		break;
-	case kCFStreamEventEndEncountered:
-		s->close_and_call();
-		break;
-	}
-}
-
-#else  // #if TARGET_OS_IPHONE
 
 #include <algorithm>
 #include <boost/array.hpp>
@@ -513,19 +149,64 @@ static void add_system_root_certs(ssl::context &ctx) {
 
 #endif
 
-thread_local EventLoop *EventLoop::current_loop = nullptr;
+ EventLoop *EventLoop::current_loop = nullptr;
 
-EventLoop::EventLoop(boost::asio::io_service &io_service) : io_service(io_service) {
+EventLoop::EventLoop(boost::asio::io_service &io_service) 
+	: io_service(io_service)
+	, worker(boost::asio::make_work_guard(io_service)) {
 	if (current_loop)
 		throw std::logic_error("RunLoop::RunLoop Only single RunLoop per thread is allowed");
 	current_loop = this;
+	run();
 }
 
-EventLoop::~EventLoop() { current_loop = nullptr; }
+EventLoop::~EventLoop() {
+	cancel();
+	current_loop = nullptr;
+}
 
-void EventLoop::cancel() { io_service.stop(); }
+void EventLoop::cancel() {
+	for (int i = 0; i < 3; ++i) {
+		io_service.stop();
+	}
+	worker.reset();
 
-void EventLoop::run() { io_service.run(); }
+	for (auto& th : threads)
+		if (th.joinable())
+			th.join();
+}
+
+void EventLoop::run_service(int i) {
+	//std::cout << "This run_service thread=" << std::this_thread::get_id() << std::endl;
+	io_service.run();
+}
+
+void EventLoop::run() {
+	for (int i = 0; i < 3; ++i)
+		threads.push_back(std::thread(std::bind(&EventLoop::run_service, this, i)));
+}
+
+//void EventLoop::run_service() {
+//	io_service.run_one();
+//	//std::cout << "Thread=" << std::this_thread::get_id() << std::endl;
+//}
+//
+//void EventLoop::poll_service() {
+//	io_service.poll();
+//	//std::cout << "Thread=" << std::this_thread::get_id() << std::endl;
+//}
+//
+//void EventLoop::run() {
+//		std::thread t(&EventLoop::run_service, this);
+//		t.join();
+//}
+//
+//void EventLoop::poll() {
+//	std::thread t(&EventLoop::poll_service, this);
+//	t.join();
+//}
+
+
 void EventLoop::wake(std::function<void()> &&a_handler) { io_service.post(std::move(a_handler)); }
 
 class SafeMessage::Impl {
@@ -626,8 +307,8 @@ public:
 	    , pending_write(false)
 	    , pending_connect(false)
 	    , socket(EventLoop::current()->io())
-	    , incoming_buffer(8192)
-	    , outgoing_buffer(8192) {
+	    , incoming_buffer(131072)
+	    , outgoing_buffer(131072) {
 		//		std::cout << std::hex << "TCPSocket::Impl this=" << (size_t)this << " owner=" << (size_t)owner <<
 		// std::dec
 		//<< std::endl;
@@ -928,6 +609,7 @@ public:
 			socket_ready = true;
 			if (owner)
 				owner->a_handler();
+			//std::cout << "Thread=" << std::this_thread::get_id() << std::endl;
 		}
 		if (e != boost::asio::error::operation_aborted) {
 			// some nasty problem with socket, say so to the client
@@ -1012,7 +694,7 @@ public:
 	UDPMulticast *owner;
 	boost::asio::ip::udp::socket socket;
 	boost::asio::ip::udp::endpoint sender_endpoint;
-	enum { max_length = 1024 };
+	enum { max_length = 65536};
 	unsigned char data[max_length];
 	bool pending_read = false;
 
@@ -1107,7 +789,6 @@ void UDPMulticast::send(const std::string &addr, uint16_t port, const void *data
 	}
 }
 
-#endif  // #if TARGET_OS_IPHONE
 
 // Code to stress-test timers
 // std::vector<std::unique_ptr<platform::Timer>> timers;
