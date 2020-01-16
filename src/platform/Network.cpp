@@ -19,6 +19,8 @@
 
 using namespace platform;
 
+static constexpr unsigned nthreads = 1;
+
 static std::pair<bool, std::string> split_ssl_address(const std::string &addr) {
 	std::string stripped_addr = addr;
 	bool ssl                  = false;
@@ -166,7 +168,8 @@ EventLoop::~EventLoop() {
 }
 
 void EventLoop::cancel() {
-	for (int i = 0; i < 3; ++i) {
+  fprintf(stderr, "cancel called\n");
+	for (auto i = 0; i < nthreads; ++i) {
 		io_service.stop();
 	}
 	worker.reset();
@@ -182,7 +185,7 @@ void EventLoop::run_service(int i) {
 }
 
 void EventLoop::run() {
-	for (int i = 0; i < 3; ++i)
+	for (auto i = 0; i < nthreads; ++i)
 		threads.push_back(std::thread(std::bind(&EventLoop::run_service, this, i)));
 }
 

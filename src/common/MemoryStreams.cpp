@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 #include "Invariant.hpp"
 
 using namespace common;
@@ -35,13 +36,18 @@ size_t StringInputStream::read_some(void *data, size_t size) {
 size_t StringInputStream::copy_to(IOutputStream &out, size_t max_count) {
 	size_t total_count = 0;
 	while (true) {
-		size_t rc = std::min(in->size() - in_position, max_count);
+    auto size = in->size();
+		size_t rc = std::min(size - in_position, max_count);
+    fprintf(stderr, "in->size(): %zu, in_position: %zu, max_count: %zu, rc: %zu\n",
+        size, in_position, max_count, rc);
 		if (rc == 0)
 			break;
 		size_t count = out.write_some(in->data() + in_position, rc);
 		in_position += count;
 		max_count -= count;
 		total_count += count;
+    fprintf(stderr, "count: %zu, in_position: %zu, max_count: %zu, total_count: %zu\n",
+        count, in_position, max_count, total_count);
 		if (count == 0)
 			break;
 	}
@@ -60,13 +66,18 @@ size_t VectorInputStream::read_some(void *data, size_t size) {
 size_t VectorInputStream::copy_to(IOutputStream &out, size_t max_count) {
 	size_t total_count = 0;
 	while (true) {
-		size_t rc = std::min(in->size() - in_position, max_count);
+    auto size = in->size();
+		size_t rc = std::min(size - in_position, max_count);
+    fprintf(stderr, "%llu: in->size(): %zu, in_position: %zu, max_count: %zu, rc: %zu\n",
+        std::this_thread::get_id(), size, in_position, max_count, rc);
 		if (rc == 0)
 			break;
 		size_t count = out.write_some(in->data() + in_position, rc);
 		in_position += count;
 		max_count -= count;
 		total_count += count;
+    fprintf(stderr, "%llu: count: %zu, in_position(addr: %p): %zu, max_count: %zu, total_count: %zu\n",
+        std::this_thread::get_id(), count, (void *)&in_position, in_position, max_count, total_count);
 		if (count == 0)
 			break;
 	}
@@ -92,7 +103,9 @@ size_t CircularBuffer::read_some(void *data, size_t size) {
 
 size_t CircularBuffer::write_some(const void *data, size_t size) {
 	size_t rc = std::min(size, write_count());
-	memcpy(write_ptr(), data, rc);
+  void *dest = write_ptr();
+  fprintf(stderr, "dest: %p, data: %p, size: %zu\n", dest, data, size);
+	memcpy(dest, data, rc);
 	did_write(rc);
 	return rc;
 }
