@@ -232,7 +232,7 @@ private:
 namespace platform {
 class EventLoop : private common::Nocopy {  // enough wrappers! if boost, use no impl at all...
 public:
-	explicit EventLoop(boost::asio::io_service &io_service);
+	explicit EventLoop(boost::asio::io_service &io_service, size_t nthreads = 1);
 	~EventLoop();
 
 	static EventLoop *current() { return current_loop; }
@@ -250,6 +250,7 @@ private:
 	void run_service(int i);
 	//void poll_service();
 	boost::asio::io_service &io_service;
+	size_t nthreads;
 	static  EventLoop *current_loop;
 	std::vector<std::thread> threads;
 	boost::asio::executor_work_guard<boost::asio::io_context::executor_type> worker;

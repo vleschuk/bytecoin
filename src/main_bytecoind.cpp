@@ -38,7 +38,8 @@ Options:
   --import-blocks=<folder-path>          Perform import of blockchain from specified folder as blocks.bin and blockindexes.bin, then exit.
   --export-blocks=<folder-path>          Perform hot export of blockchain into specified folder as blocks.bin and blockindexes.bin, then exit. This overwrites existing files.
   --archive                              Work as an archive node [default: off].
-  --paranoid-checks                      Perform consensus checks for blocks in checkpoints range (very slow sync))";
+  --paranoid-checks                      Perform consensus checks for blocks in checkpoints range (very slow sync))
+  --threads=<number>                     Number of threads to use (default: 1)";
 
 int main(int argc, const char *argv[]) try {
 	common::console::UnicodeConsoleSetup console_setup;
@@ -136,9 +137,10 @@ int main(int argc, const char *argv[]) try {
 	//	return 0;
 
 	std::cout << "Thread=" << std::this_thread::get_id() << std::endl;
+	std::cout << "Worker threads: " << config.nthreads << std::endl;
 
 	boost::asio::io_service io;
-	platform::EventLoop run_loop(io);
+	platform::EventLoop run_loop(io, config.nthreads);
 
 	Node node(log_manager, config, block_chain);
 

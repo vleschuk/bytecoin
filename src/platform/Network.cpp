@@ -19,8 +19,6 @@
 
 using namespace platform;
 
-static constexpr unsigned nthreads = 1;
-
 static std::pair<bool, std::string> split_ssl_address(const std::string &addr) {
 	std::string stripped_addr = addr;
 	bool ssl                  = false;
@@ -153,8 +151,9 @@ static void add_system_root_certs(ssl::context &ctx) {
 
  EventLoop *EventLoop::current_loop = nullptr;
 
-EventLoop::EventLoop(boost::asio::io_service &io_service) 
+EventLoop::EventLoop(boost::asio::io_service &io_service, size_t nthreads)
 	: io_service(io_service)
+	, nthreads(nthreads)
 	, worker(boost::asio::make_work_guard(io_service)) {
 	if (current_loop)
 		throw std::logic_error("RunLoop::RunLoop Only single RunLoop per thread is allowed");
@@ -169,7 +168,7 @@ EventLoop::~EventLoop() {
 
 void EventLoop::cancel() {
   fprintf(stderr, "cancel called\n");
-	for (auto i = 0; i < nthreads; ++i) {
+	for (size_t i = 0; i < nthreads; ++i) {
 		io_service.stop();
 	}
 	worker.reset();
@@ -185,7 +184,7 @@ void EventLoop::run_service(int i) {
 }
 
 void EventLoop::run() {
-	for (auto i = 0; i < nthreads; ++i)
+	for (size_t i = 0; i < nthreads; ++i)
 		threads.push_back(std::thread(std::bind(&EventLoop::run_service, this, i)));
 }
 
