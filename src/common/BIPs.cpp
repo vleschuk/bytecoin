@@ -275,7 +275,7 @@ static common::BinaryArray bitcoin_sc_add(const common::BinaryArray &a, const co
 	common::BinaryArray sum(32);
 	//	invariant(BN_bn2binpad(priv_order.pbn, sum.data(), 32), "BN_bn2binpad failed");
 	//	std::cout << common::to_hex(sum) << std::endl;
-	invariant(BN_bn2binpad(priv_bn.pbn, sum.data(), 32), "BN_bn2binpad failed");
+	//  invariant(BN_bn2binpad(priv_bn.pbn, sum.data(), 32), "BN_bn2binpad failed");
 
 	invariant(sum == sum2, "");
 #endif
