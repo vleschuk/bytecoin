@@ -55,7 +55,7 @@ public:
 	typedef std::function<void(std::string ban_reason)> D_handler;
 
 	explicit P2PClient(bool incoming, D_handler &&d_handler);
-	void set_protocol(std::unique_ptr<P2PProtocol> &&protocol);
+	void set_protocol(std::shared_ptr<P2PProtocol> protocol);
 
 	const NetworkAddress &get_address() const { return address; }
 	bool is_incoming() const { return incoming; }
@@ -78,8 +78,8 @@ private:
 	void process_requests();
 
 	friend class P2P;
-  static Mutex connection_mutex;
-	std::unique_ptr<P2PProtocol> m_protocol;
+  Mutex connection_mutex;
+	std::shared_ptr<P2PProtocol> m_protocol;
 	NetworkAddress address;
 	platform::TCPSocket sock;
 
@@ -88,23 +88,23 @@ private:
 
 	BinaryArray request;
 	std::atomic<size_t> request_body_length;
-  static Mutex receiving_mutex;
+  Mutex receiving_mutex;
 	std::atomic<bool> receiving_body;
 	common::VectorStream receiving_body_stream;
 
-  static Mutex buffer_mutex;
+  Mutex buffer_mutex;
 	common::CircularBuffer buffer;
 
-	static Mutex responses_mutex;
+	Mutex responses_mutex;
 	std::deque<common::VectorStream> responses;
 	std::atomic<bool> waiting_shutdown;
 
-  static Mutex state_mutex;
+  Mutex state_mutex;
 };
 
 class P2P {
 public:
-	typedef std::function<std::unique_ptr<P2PProtocol>(P2PClient *client)> client_factory;
+	typedef std::function<std::shared_ptr<P2PProtocol>(P2PClient *client)> client_factory;
 
 	explicit P2P(logging::ILogger &log, const Config &config, PeerDB &peers, client_factory &&c_factory);
 
@@ -122,7 +122,7 @@ private:
 	std::unique_ptr<platform::TCPAcceptor> la_socket;
 
 	// we index by bool incoming;
-	static Mutex clients_mutex;
+	Mutex clients_mutex;
 	std::map<P2PClient *, std::unique_ptr<P2PClient>>
 	    clients[2];  // Alas, no way to look for an element in set<unique_ptr<_>>
 	std::unique_ptr<P2PClient> next_client[2];

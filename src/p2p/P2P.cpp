@@ -24,12 +24,6 @@ void P2PProtocol::send_shutdown() { return m_client->send_shutdown(); }
 void P2PProtocol::disconnect(const std::string &ban_reason) { return m_client->disconnect(ban_reason); }
 void P2PProtocol::update_my_port(uint16_t port) { return m_client->update_my_port(port); }
 
-Mutex P2PClient::receiving_mutex;
-Mutex P2PClient::responses_mutex;
-Mutex P2PClient::buffer_mutex;
-Mutex P2PClient::state_mutex;
-Mutex P2PClient::connection_mutex;
-
 P2PClient::P2PClient(bool incoming, D_handler &&d_handler)
     : sock([this](bool canread, bool canwrite) { advance_state(true); },
           std::bind(&P2PClient::on_socket_disconnect, this))
@@ -40,7 +34,9 @@ P2PClient::P2PClient(bool incoming, D_handler &&d_handler)
     , buffer(RECOMMENDED_BUFFER_SIZE)
     , waiting_shutdown(false) {}
 
-void P2PClient::set_protocol(std::unique_ptr<P2PProtocol> &&protocol) {
+void P2PClient::set_protocol(std::shared_ptr<P2PProtocol> protocol) {
+	fprintf(stderr, "SETPROTO: %llu proto %p new_proto %p\n",
+			std::this_thread::get_id(), (void *)m_protocol.get(), (void *)protocol.get());
 	bool protocol_switch = protocol && m_protocol;
 	if (m_protocol)
 		m_protocol->on_disconnect(std::string{});
@@ -69,7 +65,14 @@ void P2PClient::write() {
 }
 
 void P2PClient::read(bool called_from_runloop) {
-	//BC_CREATE_LOCK(receiving_lock, receiving_mutex, "receiving");
+	BC_CREATE_LOCK(receiving_lock, receiving_mutex, "receiving");
+//	fprintf(stderr, "READ: thread %llu, sock: %p, m_proto: %p, buffer %p, request %p\n",
+//			std::this_thread::get_id(), (void *)&sock, (void *)get_protocol(),
+//			(void *)&buffer, (void *)&request);
+	if (!m_protocol) {
+		std::cerr << "Protocol object invalid" << std::endl;
+		return;
+	}
 	//BC_CREATE_LOCK(buffer_lock, buffer_mutex, "bufferglobal");
 	if (!receiving_body) {
 		//BC_CREATE_LOCK(buffer_lock, buffer_mutex, "buffer1");
@@ -142,7 +145,9 @@ void P2PClient::disconnect(const std::string &ban_reason) {
 	sock.close();
 	if (m_protocol)
 		m_protocol->on_disconnect(ban_reason);
-	m_protocol.reset();
+//	fprintf(stderr, "DISCONNECT: %llu proto %p\n",
+//			std::this_thread::get_id(), (void *)m_protocol.get());
+	//m_protocol.reset();
 	d_handler(ban_reason);
 }
 
@@ -171,8 +176,6 @@ void P2PClient::advance_state(bool called_from_runloop) {
 }
 
 void P2PClient::on_socket_disconnect() { disconnect(std::string{}); }
-
-Mutex P2P::clients_mutex;
 
 void P2P::on_client_disconnected(P2PClient *who, std::string ban_reason) {
 	//BC_CREATE_LOCK(lock, clients_mutex, "clients");

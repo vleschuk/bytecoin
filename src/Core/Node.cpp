@@ -24,8 +24,6 @@
 
 using namespace cn;
 
-Mutex Node::bp_mutex;
-
 Node::Node(logging::ILogger &log, const Config &config, BlockChainState &block_chain)
     : m_block_chain(block_chain)
     , m_config(config)

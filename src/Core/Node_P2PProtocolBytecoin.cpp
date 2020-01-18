@@ -24,8 +24,6 @@ static bool greater_fee_per_byte(const TransactionDesc &a, const TransactionDesc
 	return std::tie(afb, a.hash) > std::tie(bfb, b.hash);
 }
 
-Mutex Node::P2PProtocolBytecoin::node_mutex;
-
 Node::P2PProtocolBytecoin::P2PProtocolBytecoin(Node *node, P2PClient *client)
     : P2PProtocolBasic(node->m_config, node->m_p2p.get_unique_number(), client)
     , m_node(node)

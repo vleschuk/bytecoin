@@ -137,7 +137,7 @@ protected:
 
 public:
 	class P2PProtocolBytecoin : public P2PProtocolBasic {
-		static Mutex node_mutex;
+		Mutex node_mutex;
 		Node *const m_node;
 		void after_handshake();
 
@@ -202,7 +202,7 @@ protected:
 	std::chrono::steady_clock::time_point log_response_timestamp;
 
 	void advance_all_downloads();
-	static Mutex bp_mutex;
+	Mutex bp_mutex;
 	typedef std::set<P2PProtocolBytecoin *> BPSet;
 	BPSet m_broadcast_protocols;
 

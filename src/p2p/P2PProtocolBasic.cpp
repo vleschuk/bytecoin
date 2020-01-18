@@ -118,8 +118,8 @@ void P2PProtocolBasic::on_disconnect(const std::string &ban_reason) {
 
 size_t P2PProtocolBasic::on_parse_header(common::CircularBuffer &buffer, BinaryArray &request) {
 	//BC_CREATE_LOCK(lock, basic_mtx, "basic");
-	fprintf(stderr, "thread %llu parsing request %p to buffer %p\n",
-			std::this_thread::get_id(), (void *)&request, (void *)&buffer);
+//	fprintf(stderr, "thread %llu parsing request %p to buffer %p\n",
+//			std::this_thread::get_id(), (void *)&request, (void *)&buffer);
 	if (buffer.size() < LevinProtocol::HEADER_SIZE())
 		return std::string::npos;
 	request.resize(LevinProtocol::HEADER_SIZE());
