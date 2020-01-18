@@ -1,6 +1,7 @@
 /* vim: set tabstop=4 shiftwidth=4 noexpandtab : */
 #pragma once
 #include <iostream>
+#include <iomanip>
 #include <mutex>
 #include <thread>
 
@@ -25,11 +26,13 @@ public:
 		if (nthreads > 1) {
 			if (debug_locks)
 				std::cerr << "Thread " << std::this_thread::get_id()
-					<< " locking " << id_ << " in " << where_ << std::endl;
+					<< " locking " << id_ << "(" << std::hex << (void *)&mtx_
+					<< ") in " << where_ << std::endl;
 			mtx_.lock();
 			if (debug_locks)
 				std::cerr << "Thread " << std::this_thread::get_id()
-					<< " locked " << id_ << " in " << where_ << std::endl;
+					<< " locked " << id_ << "(" << std::hex << (void *)&mtx_
+					<< ") in " << where_ << std::endl;
 		}
 	}
 	~LockGuard() {
@@ -37,7 +40,8 @@ public:
 			mtx_.unlock();
 			if (debug_locks)
 				std::cerr << "Thread " << std::this_thread::get_id()
-					<< " unlocked " << id_ << " in " << where_ << std::endl;
+					<< " unlocked " << id_ << "(" << std::hex << (void *)&mtx_
+					<< ") in " << where_ << std::endl;
 		}
 	}
 private:
