@@ -71,6 +71,7 @@ Config::Config(common::CommandLine &cmd)
     , rpc_sync_blocks_max_count(api::cnd::SyncBlocks::Request::MAX_COUNT)
     , rpc_sync_blocks_max_size(api::cnd::SyncBlocks::Request::MAX_SIZE)
     , paranoid_checks(cmd.get_bool("--paranoid-checks"))
+    , debug_locks(cmd.get_bool("--debug-locks"))
     , trusted_public_key(P2P_STAT_TRUSTED_PUBLIC_KEY)
     , payment_queue_confirmations(720) {
 	if (net == "test") {

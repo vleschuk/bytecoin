@@ -7,6 +7,7 @@
 #include "Core/Node.hpp"
 #include "common/CommandLine.hpp"
 #include "common/ConsoleTools.hpp"
+#include "common/Lock.hpp"
 #include "logging/ConsoleLogger.hpp"
 #include "logging/LoggerManager.hpp"
 #include "platform/ExclusiveLock.hpp"
@@ -38,8 +39,10 @@ Options:
   --import-blocks=<folder-path>          Perform import of blockchain from specified folder as blocks.bin and blockindexes.bin, then exit.
   --export-blocks=<folder-path>          Perform hot export of blockchain into specified folder as blocks.bin and blockindexes.bin, then exit. This overwrites existing files.
   --archive                              Work as an archive node [default: off].
+<<<<<<< HEAD
   --paranoid-checks                      Perform consensus checks for blocks in checkpoints range (very slow sync).
-  --threads=<number>                     Number of threads to use [default: 1].))";
+  --threads=<number>                     Number of threads to use [default: 1].
+  --debug-locks                          Perform locks debugging (default: 0))";
 
 int main(int argc, const char *argv[]) try {
 	common::console::UnicodeConsoleSetup console_setup;
@@ -129,6 +132,10 @@ int main(int argc, const char *argv[]) try {
 	}
 	//	block_chain.test_undo_everything(1790000);
 	//	return 0;
+
+	common::nthreads = config.nthreads;
+	common::debug_locks = config.debug_locks;
+
 	boost::asio::io_service io;
 	platform::EventLoop run_loop(io, config.nthreads);
 
