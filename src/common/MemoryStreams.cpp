@@ -11,10 +11,13 @@
 
 using namespace common;
 
+Mutex MemoryInputStream::memory_mutex;
+
 MemoryInputStream::MemoryInputStream(const void *buffer, size_t buffer_size)
     : buffer(static_cast<const char *>(buffer)), buffer_size(buffer_size), in_position(0) {}
 
 size_t MemoryInputStream::read_some(void *data, size_t size) {
+	//BC_CREATE_LOCK(lock, memory_mutex, "memory");
 	invariant(in_position <= buffer_size, "jump over the end of buffer");
 	size = std::min(size, buffer_size - in_position);
 
@@ -24,7 +27,10 @@ size_t MemoryInputStream::read_some(void *data, size_t size) {
 	return size;
 }
 
+Mutex StringInputStream::in_mutex;
+
 size_t StringInputStream::read_some(void *data, size_t size) {
+	BC_CREATE_LOCK(lock, in_mutex, "in");
 	invariant(in_position <= in->size(), "jump over the end of buffer");
 	size = std::min(size, in->size() - in_position);
 
@@ -36,25 +42,24 @@ size_t StringInputStream::read_some(void *data, size_t size) {
 size_t StringInputStream::copy_to(IOutputStream &out, size_t max_count) {
 	size_t total_count = 0;
 	while (true) {
-    auto size = in->size();
-		size_t rc = std::min(size - in_position, max_count);
-    fprintf(stderr, "in->size(): %zu, in_position: %zu, max_count: %zu, rc: %zu\n",
-        size, in_position, max_count, rc);
+		BC_CREATE_LOCK(lock, in_mutex, "in");
+		size_t rc = std::min(in->size() - in_position, max_count);
 		if (rc == 0)
 			break;
 		size_t count = out.write_some(in->data() + in_position, rc);
 		in_position += count;
 		max_count -= count;
 		total_count += count;
-    fprintf(stderr, "count: %zu, in_position: %zu, max_count: %zu, total_count: %zu\n",
-        count, in_position, max_count, total_count);
 		if (count == 0)
 			break;
 	}
 	return total_count;
 }
 
+Mutex VectorInputStream::in_mutex;
+
 size_t VectorInputStream::read_some(void *data, size_t size) {
+	BC_CREATE_LOCK(lock, in_mutex, "in");
 	invariant(in_position <= in->size(), "jump over the end of buffer");
 	size = std::min(size, in->size() - in_position);
 
@@ -66,6 +71,7 @@ size_t VectorInputStream::read_some(void *data, size_t size) {
 size_t VectorInputStream::copy_to(IOutputStream &out, size_t max_count) {
 	size_t total_count = 0;
 	while (true) {
+		BC_CREATE_LOCK(lock, in_mutex, "in");
     auto size = in->size();
 		size_t rc = std::min(size - in_position, max_count);
     fprintf(stderr, "%llu: in->size(): %zu, in_position: %zu, max_count: %zu, rc: %zu\n",
@@ -84,17 +90,26 @@ size_t VectorInputStream::copy_to(IOutputStream &out, size_t max_count) {
 	return total_count;
 }
 
+Mutex StringOutputStream::out_mutex;
+
 size_t StringOutputStream::write_some(const void *data, size_t size) {
+	BC_CREATE_LOCK(lock, out_mutex, "out");
 	out->append(static_cast<const char *>(data), size);
 	return size;
 }
 
+Mutex VectorOutputStream::out_mutex;
+
 size_t VectorOutputStream::write_some(const void *data, size_t size) {
+	BC_CREATE_LOCK(lock, out_mutex, "out");
 	append(*out, static_cast<const uint8_t *>(data), static_cast<const uint8_t *>(data) + size);
 	return size;
 }
 
+Mutex CircularBuffer::impl_mutex;
+
 size_t CircularBuffer::read_some(void *data, size_t size) {
+	BC_CREATE_LOCK(lock, impl_mutex, "impl");
 	size_t rc = std::min(size, read_count());
 	memcpy(data, read_ptr(), rc);
 	did_read(rc);
@@ -102,6 +117,7 @@ size_t CircularBuffer::read_some(void *data, size_t size) {
 }
 
 size_t CircularBuffer::write_some(const void *data, size_t size) {
+	BC_CREATE_LOCK(lock, impl_mutex, "impl");
 	size_t rc = std::min(size, write_count());
   void *dest = write_ptr();
   fprintf(stderr, "dest: %p, data: %p, size: %zu\n", dest, data, size);
@@ -111,11 +127,13 @@ size_t CircularBuffer::write_some(const void *data, size_t size) {
 }
 
 void CircularBuffer::did_write(size_t count) {
+	BC_CREATE_LOCK(lock, impl_mutex, "impl");
 	write_pos += count;
 	invariant(write_pos <= read_pos + impl.size(), "Writing past end of Buffer");
 }
 
 void CircularBuffer::did_read(size_t count) {
+	BC_CREATE_LOCK(lock, impl_mutex, "impl");
 	read_pos += count;
 	invariant(read_pos <= write_pos, "Reading past end of Buffer");
 	if (read_pos >= impl.size()) {
@@ -126,6 +144,7 @@ void CircularBuffer::did_read(size_t count) {
 
 void CircularBuffer::copy_from(IInputStream &in) {
 	while (true) {
+		BC_CREATE_LOCK(lock, impl_mutex, "impl");
 		size_t wc = write_count();
 		if (wc == 0)
 			break;
@@ -139,6 +158,7 @@ void CircularBuffer::copy_from(IInputStream &in) {
 size_t CircularBuffer::copy_to(IOutputStream &out, size_t max_count) {
 	size_t total_count = 0;
 	while (true) {
+		BC_CREATE_LOCK(lock, impl_mutex, "impl");
 		size_t rc = std::min(read_count(), max_count);
 		if (rc == 0)
 			break;

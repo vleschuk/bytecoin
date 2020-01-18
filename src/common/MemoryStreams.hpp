@@ -7,6 +7,7 @@
 #include <string>
 #include "Streams.hpp"
 #include "common/BinaryArray.hpp"
+#include "common/Lock.hpp"
 #include "common/Nocopy.hpp"
 
 namespace common {
@@ -19,6 +20,7 @@ public:
 	size_t read_some(void *data, size_t size) override;
 
 private:
+	static Mutex memory_mutex;
 	const char *buffer;
 	size_t buffer_size;
 	size_t in_position;
@@ -34,6 +36,7 @@ public:
 	size_t copy_to(IOutputStream &out, size_t max_count = std::numeric_limits<size_t>::max());
 
 protected:
+	static Mutex in_mutex;
 	const std::string *in;
 	size_t in_position;
 };
@@ -44,6 +47,7 @@ public:
 	size_t write_some(const void *data, size_t size) override;
 
 protected:
+	static Mutex out_mutex;
 	std::string *out;
 };
 
@@ -76,6 +80,7 @@ public:
 	}
 
 private:
+	static Mutex m_buffer_mutex;
 	std::string m_buffer;
 };
 
@@ -91,6 +96,7 @@ public:
 	size_t copy_to(IOutputStream &out, size_t max_count = std::numeric_limits<size_t>::max());
 
 protected:
+	static Mutex in_mutex;
 	const BinaryArray *in;
 	size_t in_position;
 };
@@ -101,6 +107,7 @@ public:
 	size_t write_some(const void *data, size_t size) override;
 
 protected:
+  static Mutex out_mutex;
 	BinaryArray *out;
 };
 
@@ -123,6 +130,7 @@ public:
 		return *this;
 	}
 
+  static Mutex buffer_mutex;
 	BinaryArray &buffer() { return m_buffer; }
 	const BinaryArray &buffer() const { return m_buffer; }
 
@@ -132,11 +140,13 @@ public:
 	}
 
 private:
+	static Mutex m_buffer_mutex;
 	BinaryArray m_buffer;
 };
 
 // Classic circular buffer
 class CircularBuffer : public IInputStream, public IOutputStream {
+	static Mutex impl_mutex;
 	BinaryArray impl;
 	size_t read_pos;   // 0..impl.size-1
 	size_t write_pos;  // read_pos..read_pos + impl.size
