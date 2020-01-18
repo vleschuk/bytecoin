@@ -24,6 +24,8 @@ static bool greater_fee_per_byte(const TransactionDesc &a, const TransactionDesc
 	return std::tie(afb, a.hash) > std::tie(bfb, b.hash);
 }
 
+Mutex Node::P2PProtocolBytecoin::node_mutex;
+
 Node::P2PProtocolBytecoin::P2PProtocolBytecoin(Node *node, P2PClient *client)
     : P2PProtocolBasic(node->m_config, node->m_p2p.get_unique_number(), client)
     , m_node(node)
@@ -274,8 +276,7 @@ bool Node::P2PProtocolBytecoin::on_idle(std::chrono::steady_clock::time_point id
 			disconnect("on_idle add_block BAN what=" + what);
 			return false;
 		}
-		for (auto who : m_node->m_broadcast_protocols)
-			who->advance_transactions();
+		m_node->advance_bp_transactions();
 		if (expected_height != info.height) {  // TODO - BAN
 			m_node->m_log(logging::INFO) << "on_idle add_block lied about height, expected height " << expected_height
 			                             << " actual height=" << info.height << " wb=" << pb.bid;
@@ -304,8 +305,9 @@ bool Node::P2PProtocolBytecoin::on_idle(std::chrono::steady_clock::time_point id
 }
 
 void Node::P2PProtocolBytecoin::after_handshake() {
+	BC_CREATE_LOCK(lock, node_mutex, "node");
 	m_node->m_p2p.peers_updated();
-	m_node->m_broadcast_protocols.insert(this);
+	m_node->insert_bp(this);
 	m_node->advance_long_poll();
 
 	auto signed_checkpoints = m_node->m_block_chain.get_latest_checkpoints();
@@ -411,6 +413,7 @@ void Node::P2PProtocolBytecoin::on_msg_notify_request_objects(p2p::GetObjects::R
 }
 
 void Node::P2PProtocolBytecoin::on_msg_notify_request_objects(p2p::GetObjects::Response &&req) {
+	BC_CREATE_LOCK(lock, node_mutex, "node");
 	if (req.blocks.size() + req.txs.size() + req.missed_ids.size() != 1)
 		return disconnect("Too much objects in GetObjectsResponse");
 	for (auto &&rb : req.blocks) {  // 0 or 1
@@ -494,9 +497,7 @@ void Node::P2PProtocolBytecoin::on_msg_notify_request_objects(p2p::GetObjects::R
 		tit = m_transaction_descs.erase(tit);
 		invariant(m_downloading_transaction_count > 0, "");
 		m_downloading_transaction_count -= 1;
-		for (auto who : m_node->m_broadcast_protocols)
-			if (who != this)
-				who->transaction_download_finished(tid, true);
+		m_node->transactions_download_finished(tid, true, this);
 	}
 	for (auto &&tid : req.missed_ids) {  // Here should be only transactions, we ask only block peer always has
 		auto cit = m_node->downloading_transactions.find(tid);
@@ -510,9 +511,7 @@ void Node::P2PProtocolBytecoin::on_msg_notify_request_objects(p2p::GetObjects::R
 		tit = m_transaction_descs.erase(tit);
 		invariant(m_downloading_transaction_count > 0, "");
 		m_downloading_transaction_count -= 1;
-		for (auto who : m_node->m_broadcast_protocols)
-			if (who != this)
-				who->transaction_download_finished(tid, false);
+		m_node->transactions_download_finished(tid, false, this);
 	}
 	if (m_downloading_block_count != 0)
 		m_download_timer.once(m_node->m_config.download_block_timeout);
@@ -534,7 +533,8 @@ void Node::P2PProtocolBytecoin::on_msg_notify_request_objects(p2p::GetObjects::R
 }
 
 void Node::P2PProtocolBytecoin::on_disconnect(const std::string &ban_reason) {
-	m_node->m_broadcast_protocols.erase(this);
+	BC_CREATE_LOCK(lock, node_mutex, "node");
+	m_node->erase_bp(this);
 
 	m_chain_request_sent = false;
 	m_chain_timer.cancel();
@@ -558,8 +558,7 @@ void Node::P2PProtocolBytecoin::on_disconnect(const std::string &ban_reason) {
 			tit = m_node->downloading_transactions.erase(tit);
 			m_downloading_transaction_count -= 1;
 		}
-		for (auto who : m_node->m_broadcast_protocols)
-			who->transaction_download_finished(cit.first, false);
+		m_node->transactions_download_finished(cit.first, false);
 	}
 	m_transaction_descs.clear();
 	m_download_transactions_timer.cancel();

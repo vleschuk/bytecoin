@@ -6,6 +6,7 @@
 #include <functional>
 #include <iostream>
 #include "BlockChainState.hpp"
+#include "common/Lock.hpp"
 #include "http/BinaryRpc.hpp"
 #include "http/JsonRpc.hpp"
 #include "p2p/P2P.hpp"
@@ -20,6 +21,8 @@ namespace platform {
 class PreventSleep;
 }
 namespace cn {
+
+using common::Mutex;
 
 class Node {
 public:
@@ -87,6 +90,12 @@ public:
 
 	static void export_static_sync_blocks(const BlockChainState &block_chain, const std::string &folder);
 
+	class P2PProtocolBytecoin;
+	void erase_bp(P2PProtocolBytecoin *bp);
+	void insert_bp(P2PProtocolBytecoin *bp);
+	void advance_bp_transactions();
+	void transactions_download_finished(Hash hash, bool flag, const P2PProtocolBytecoin *bp = nullptr);
+
 protected:
 	std::unique_ptr<http::Server> m_api;
 	std::unique_ptr<platform::PreventSleep> m_prevent_sleep;
@@ -115,7 +124,7 @@ protected:
 	Timestamp m_last_stat_request_time = 0;
 	// Prevent replay attacks by only trusting requests with timestamp > than previous request
 
-	class P2PProtocolBytecoin;
+protected:
 	struct DownloadInfo {
 		size_t chain_counter                 = 0;
 		P2PProtocolBytecoin *who_downloading = nullptr;
@@ -126,7 +135,9 @@ protected:
 	void remove_chain_block(std::map<Hash, DownloadInfo>::iterator it);
 	std::map<Hash, P2PProtocolBytecoin *> downloading_transactions;
 
+public:
 	class P2PProtocolBytecoin : public P2PProtocolBasic {
+		static Mutex node_mutex;
 		Node *const m_node;
 		void after_handshake();
 
@@ -148,7 +159,6 @@ protected:
 		std::map<Hash, TransactionDesc> m_transaction_descs;
 		void on_syncpool_timer();
 		void on_download_transactions_timer();
-		void transaction_download_finished(const Hash &tid, bool success);
 		bool on_transaction_descs(const std::vector<TransactionDesc> &descs);
 
 	protected:
@@ -181,7 +191,9 @@ protected:
 		void advance_blocks();
 		bool on_idle(std::chrono::steady_clock::time_point idle_start);
 		void advance_transactions();
+		void transaction_download_finished(const Hash &tid, bool success);
 	};
+protected:
 	std::unique_ptr<P2PProtocol> client_factory(P2PClient *client) {
 		return std::make_unique<P2PProtocolBytecoin>(this, client);
 	}
@@ -190,7 +202,9 @@ protected:
 	std::chrono::steady_clock::time_point log_response_timestamp;
 
 	void advance_all_downloads();
-	std::set<P2PProtocolBytecoin *> m_broadcast_protocols;
+	static Mutex bp_mutex;
+	typedef std::set<P2PProtocolBytecoin *> BPSet;
+	BPSet m_broadcast_protocols;
 
 	BlockPreparatorMulticore m_pow_checker;
 	// TODO - periodically clear m_pow_checker of blocks that were not asked

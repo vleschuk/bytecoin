@@ -24,6 +24,8 @@
 
 using namespace cn;
 
+Mutex Node::bp_mutex;
+
 Node::Node(logging::ILogger &log, const Config &config, BlockChainState &block_chain)
     : m_block_chain(block_chain)
     , m_config(config)
@@ -1090,4 +1092,28 @@ void Node::export_static_sync_blocks(const BlockChainState &block_chain, const s
 	std::cout << "min_total_count=" << min_total_count << " max_total_count=" << max_total_count << std::endl;
 	std::cout << "sum_total_size_real=" << sum_total_size_real << " sum_total_size_link=" << sum_total_size_link
 	          << std::endl;
+}
+
+void Node::erase_bp(P2PProtocolBytecoin *bp) {
+	BC_CREATE_LOCK (lock, bp_mutex, "bp");
+	m_broadcast_protocols.erase(bp);
+}
+
+void Node::insert_bp(P2PProtocolBytecoin *bp) {
+	BC_CREATE_LOCK(lock, bp_mutex, "bp");
+	m_broadcast_protocols.insert(bp);
+}
+
+void Node::advance_bp_transactions() {
+	BC_CREATE_LOCK(lock, bp_mutex, "bp");
+	for (auto who : m_broadcast_protocols)
+		who->advance_transactions();
+}
+
+void Node::transactions_download_finished(Hash hash, bool flag, const P2PProtocolBytecoin *exclude) {
+	BC_CREATE_LOCK(lock, bp_mutex, "bp");
+	for (auto who : m_broadcast_protocols) {
+		if (nullptr != exclude && exclude == who) continue;
+		who->transaction_download_finished(hash, flag);
+	}
 }
