@@ -1,6 +1,7 @@
 // Copyright (c) 2012-2018, The CryptoNote developers, The Bytecoin developers.
 // Licensed under the GNU Lesser General Public License. See LICENSE for details.
 
+#include <atomic>
 #include "Network.hpp"
 #include "Time.hpp"
 #include "common/MemoryStreams.hpp"
@@ -334,12 +335,15 @@ public:
 	common::CircularBuffer outgoing_buffer;
 
 	void close(bool called_from_run_loop) {
+		static std::atomic<bool> closed(false);
+		if (closed) return;
 #if platform_USE_SSL
 		if (ssl_socket)
 			ssl_socket->lowest_layer().close();
 		else
 #endif
 			socket.close();
+		closed = true;
 		TCPSocket *was_owner = owner;
 		if (pending_write || pending_read || pending_connect) {
 			//			if(socket.lowest_layer().is_open())
@@ -386,7 +390,8 @@ public:
 #endif
 			socket.set_option(boost::asio::socket_base::keep_alive(true), ec);
 		if (ec)
-			std::cout << "Cannot set keepalive on socket, ec=" << ec << std::endl;
+			std::cout << "Cannot set keepalive on socket, ec="
+				<< ec << " " << ec.message() << std::endl;
 	}
 	void handle_connect(const boost::system::error_code &e) {
 		if (!e) {
