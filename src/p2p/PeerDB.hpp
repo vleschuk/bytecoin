@@ -9,6 +9,7 @@
 #include "CryptoNote.hpp"
 
 #include "Core/Currency.hpp"
+#include "common/Lock.hpp"
 #include "logging/LoggerMessage.hpp"
 #include "p2p/P2pProtocolTypes.hpp"
 #include "platform/DB.hpp"
@@ -21,8 +22,10 @@
 #include <boost/multi_index_container.hpp>
 
 namespace cn {
+using common::Mutex;
 class Config;
 class PeerDB {
+	static Mutex DB_mutex;
 public:
 	typedef platform::DB DB;
 
