@@ -9,12 +9,16 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <atomic>
 #include "common/MemoryStreams.hpp"
+#include "common/Lock.hpp"
 #include "logging/LoggerMessage.hpp"
 #include "p2p/P2pProtocolTypes.hpp"
 #include "platform/Network.hpp"
 
 namespace cn {
+
+using common::Mutex;
 
 class Config;
 class P2P;
@@ -74,6 +78,7 @@ private:
 	void process_requests();
 
 	friend class P2P;
+  static Mutex connection_mutex;
 	std::unique_ptr<P2PProtocol> m_protocol;
 	NetworkAddress address;
 	platform::TCPSocket sock;
@@ -82,14 +87,19 @@ private:
 	D_handler d_handler;
 
 	BinaryArray request;
-	size_t request_body_length = 0;
-	bool receiving_body        = false;
+	std::atomic<size_t> request_body_length;
+  static Mutex receiving_mutex;
+	std::atomic<bool> receiving_body;
 	common::VectorStream receiving_body_stream;
 
+  static Mutex buffer_mutex;
 	common::CircularBuffer buffer;
 
+	static Mutex responses_mutex;
 	std::deque<common::VectorStream> responses;
-	bool waiting_shutdown = false;
+	std::atomic<bool> waiting_shutdown;
+
+  static Mutex state_mutex;
 };
 
 class P2P {
@@ -112,6 +122,7 @@ private:
 	std::unique_ptr<platform::TCPAcceptor> la_socket;
 
 	// we index by bool incoming;
+	static Mutex clients_mutex;
 	std::map<P2PClient *, std::unique_ptr<P2PClient>>
 	    clients[2];  // Alas, no way to look for an element in set<unique_ptr<_>>
 	std::unique_ptr<P2PClient> next_client[2];

@@ -6,6 +6,7 @@
 #include <ctime>
 #include <iostream>
 #include <map>
+#include <thread>
 #include "Core/Config.hpp"
 #include "PeerDB.hpp"
 #include "common/Invariant.hpp"
@@ -23,12 +24,21 @@ void P2PProtocol::send_shutdown() { return m_client->send_shutdown(); }
 void P2PProtocol::disconnect(const std::string &ban_reason) { return m_client->disconnect(ban_reason); }
 void P2PProtocol::update_my_port(uint16_t port) { return m_client->update_my_port(port); }
 
+Mutex P2PClient::receiving_mutex;
+Mutex P2PClient::responses_mutex;
+Mutex P2PClient::buffer_mutex;
+Mutex P2PClient::state_mutex;
+Mutex P2PClient::connection_mutex;
+
 P2PClient::P2PClient(bool incoming, D_handler &&d_handler)
     : sock([this](bool canread, bool canwrite) { advance_state(true); },
           std::bind(&P2PClient::on_socket_disconnect, this))
     , incoming(incoming)
     , d_handler(std::move(d_handler))
-    , buffer(RECOMMENDED_BUFFER_SIZE) {}
+    , request_body_length(0)
+    , receiving_body(false)
+    , buffer(RECOMMENDED_BUFFER_SIZE)
+    , waiting_shutdown(false) {}
 
 void P2PClient::set_protocol(std::unique_ptr<P2PProtocol> &&protocol) {
 	bool protocol_switch = protocol && m_protocol;
@@ -43,18 +53,26 @@ void P2PClient::set_protocol(std::unique_ptr<P2PProtocol> &&protocol) {
 }
 
 void P2PClient::write() {
-	while (!responses.empty()) {
+	while (true) {
+		BC_CREATE_LOCK(lock, responses_mutex, "responses1");
+		if (responses.empty())
+			break;
 		responses.front().copy_to(sock);
 		if (!responses.front().empty())
 			break;
 		responses.pop_front();
 	}
+
+	BC_CREATE_LOCK(lock, responses_mutex, "responses2");
 	if (responses.empty() && waiting_shutdown)
 		sock.shutdown_both();
 }
 
 void P2PClient::read(bool called_from_runloop) {
+	//BC_CREATE_LOCK(receiving_lock, receiving_mutex, "receiving");
+	//BC_CREATE_LOCK(buffer_lock, buffer_mutex, "bufferglobal");
 	if (!receiving_body) {
+		//BC_CREATE_LOCK(buffer_lock, buffer_mutex, "buffer1");
 		buffer.copy_from(sock);
 		request_body_length = m_protocol->on_parse_header(buffer, request);
 		if (request_body_length == std::string::npos)
@@ -63,6 +81,7 @@ void P2PClient::read(bool called_from_runloop) {
 		receiving_body_stream = common::VectorStream();
 	}
 	while (true) {
+		//BC_CREATE_LOCK(buffer_lock, buffer_mutex, "buffer2");
 		invariant(receiving_body_stream.size() <= request_body_length, "");
 		size_t max_count = request_body_length - receiving_body_stream.size();
 		buffer.copy_to(receiving_body_stream, max_count);
@@ -84,6 +103,7 @@ void P2PClient::process_requests() {
 }
 
 bool P2PClient::read_next_request(BinaryArray &header, BinaryArray &body) {
+	//BC_CREATE_LOCK(lock, receiving_mutex, "receiving");
 	advance_state(false);
 	if (!receiving_body)
 		return false;
@@ -99,8 +119,10 @@ bool P2PClient::read_next_request(BinaryArray &header, BinaryArray &body) {
 }
 
 void P2PClient::send(BinaryArray &&body) {
-	responses.emplace_back(std::move(body));
-
+	{
+		//BC_CREATE_LOCK(lock, responses_mutex, "responses");
+		responses.emplace_back(std::move(body));
+	}
 	write();
 }
 
@@ -110,6 +132,7 @@ void P2PClient::send_shutdown() {
 }
 
 void P2PClient::disconnect(const std::string &ban_reason) {
+	//BC_CREATE_LOCK(lock, connection_mutex, "connection");
 	buffer.clear();
 	receiving_body        = false;
 	request               = BinaryArray();
@@ -135,6 +158,7 @@ bool P2PClient::test_connect(const NetworkAddress &addr) {
 bool P2PClient::is_connected() const { return sock.is_open(); }
 
 void P2PClient::advance_state(bool called_from_runloop) {
+	//BC_CREATE_LOCK(lock, state_mutex, "state");
 	try {
 		write();
 		if (responses.size() > 1)
@@ -148,7 +172,10 @@ void P2PClient::advance_state(bool called_from_runloop) {
 
 void P2PClient::on_socket_disconnect() { disconnect(std::string{}); }
 
+Mutex P2P::clients_mutex;
+
 void P2P::on_client_disconnected(P2PClient *who, std::string ban_reason) {
+	//BC_CREATE_LOCK(lock, clients_mutex, "clients");
 	if (!ban_reason.empty())
 		peers.set_peer_banned(who->get_address(), ban_reason, get_local_time());
 	const bool incoming = who->is_incoming();
@@ -169,7 +196,9 @@ void P2P::accept_all() {
 		return;
 	//        std::cout << "Server::accept=" << std::endl;
 	const bool incoming = true;
-	while (clients[incoming].size() < m_config.p2p_max_incoming_connections) {
+	while (true) {
+		BC_CREATE_LOCK(lock, clients_mutex, "clients");
+		if (!(clients[incoming].size() < m_config.p2p_max_incoming_connections)) break;
 		if (!next_client[incoming]) {
 			next_client[incoming] =
 			    std::make_unique<P2PClient>(incoming, [](std::string ban_reason) {});  // We do not know Client * yet
@@ -201,6 +230,7 @@ void P2P::accept_all() {
 }
 
 bool P2P::connect_one(const NetworkAddress &address) {
+	BC_CREATE_LOCK(lock, clients_mutex, "clients");
 	const bool incoming = false;
 	if (!next_client[incoming]) {
 		next_client[incoming] =
@@ -220,6 +250,7 @@ bool P2P::connect_one(const NetworkAddress &address) {
 }
 
 void P2P::connect_all() {
+	//BC_CREATE_LOCK(lock, clients_mutex, "clients");
 	if (failed_connection_attempts_counter > m_config.p2p_max_outgoing_connections * 5)  // CONSTANT in code
 		reconnect_timer.once(m_config.p2p_no_internet_reconnect_delay);
 	else
@@ -238,7 +269,7 @@ void P2P::connect_all_nodelay() {
 		NetworkAddress best_address;
 		if (!peers.get_peer_to_connect(best_address, connected, get_local_time())) {
 			m_log(logging::DEBUGGING) << "No peers to connect to, will try again after "
-			                          << m_config.p2p_network_unreachable_delay << " seconds";
+			    << m_config.p2p_network_unreachable_delay << " seconds";
 			reconnect_timer.once(m_config.p2p_network_unreachable_delay);
 			return;
 		}
@@ -277,7 +308,7 @@ P2P::P2P(logging::ILogger &log, const Config &config, PeerDB &peers, client_fact
 		common::console::set_text_color(common::console::Default);
 	} catch (const std::runtime_error &ex) {
 		m_log(logging::WARNING) << " failed to create listening socket, what=" << common::what(ex)
-		                        << ", working with outbound connections only";
+			<< ", working with outbound connections only";
 	}
 	connect_all();
 	accept_all();

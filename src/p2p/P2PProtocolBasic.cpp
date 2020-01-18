@@ -8,6 +8,8 @@
 
 using namespace cn;
 
+Mutex P2PProtocolBasic::basic_mtx;
+
 template<typename Cmd>
 P2PProtocolBasic::LevinHandlerFunction levin_method(void (P2PProtocolBasic::*handler)(Cmd &&)) {
 	return [handler](P2PProtocolBasic *who, BinaryArray &&body) {
@@ -56,7 +58,10 @@ P2PProtocolBasic::P2PProtocolBasic(const Config &config, uint64_t my_unique_numb
     : P2PProtocol(client)
     , no_incoming_timer([this]() { disconnect(std::string{}); })
     , no_outgoing_timer(std::bind(&P2PProtocolBasic::send_timed_sync, this))
+    , peer_version(0)
+    , first_message_after_handshake_processed(false)
     , my_unique_number(my_unique_number)
+    , peer_unique_number(0)
     , config(config) {}
 
 void P2PProtocolBasic::send_timed_sync() {
@@ -100,6 +105,7 @@ void P2PProtocolBasic::on_connect() {
 }
 
 void P2PProtocolBasic::on_disconnect(const std::string &ban_reason) {
+	BC_CREATE_LOCK(lock, basic_mtx, "basic");
 	P2PProtocol::on_disconnect(ban_reason);
 	// We reuse client instances between connects, so we reinit vars here
 	no_outgoing_timer.cancel();
@@ -111,6 +117,9 @@ void P2PProtocolBasic::on_disconnect(const std::string &ban_reason) {
 }
 
 size_t P2PProtocolBasic::on_parse_header(common::CircularBuffer &buffer, BinaryArray &request) {
+	//BC_CREATE_LOCK(lock, basic_mtx, "basic");
+	fprintf(stderr, "thread %llu parsing request %p to buffer %p\n",
+			std::this_thread::get_id(), (void *)&request, (void *)&buffer);
 	if (buffer.size() < LevinProtocol::HEADER_SIZE())
 		return std::string::npos;
 	request.resize(LevinProtocol::HEADER_SIZE());
@@ -161,8 +170,10 @@ void P2PProtocolBasic::msg_handshake(p2p::Handshake::Request &&req) {
 	if (msg.peerlist.size() > p2p::Handshake::Response::MAX_SEND_PEER_COUNT)
 		msg.peerlist.resize(p2p::Handshake::Response::MAX_SEND_PEER_COUNT);
 
+	std::cout << "p2p thread: " << std::this_thread::get_id() << std::endl;
 	BinaryArray raw_msg = LevinProtocol::send(msg);
 	send(std::move(raw_msg));
+	BC_CREATE_LOCK(lock, basic_mtx, "basic");
 	peer_version = req.node_data.version;
 	set_peer_sync_data(req.payload_data);
 	peer_unique_number = req.node_data.peer_id;
@@ -174,6 +185,7 @@ void P2PProtocolBasic::msg_handshake(p2p::Handshake::Request &&req) {
 	on_msg_handshake(std::move(req));
 }
 void P2PProtocolBasic::msg_handshake(p2p::Handshake::Response &&req) {
+	BC_CREATE_LOCK(lock, basic_mtx, "basic");
 	if (is_incoming())
 		return disconnect("p2p::Handshake response from incoming node");
 	if (req.node_data.network_id != config.network_id)

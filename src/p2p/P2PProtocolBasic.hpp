@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include "LevinProtocol.hpp"
 #include "P2P.hpp"
 #include "P2pProtocolDefinitions.hpp"
@@ -18,12 +19,12 @@ public:
 private:
 	platform::Timer no_incoming_timer;
 	platform::Timer no_outgoing_timer;
-	int peer_version                             = 0;  // 0 means no handshake yet
-	bool first_message_after_handshake_processed = false;
+  std::atomic<int> peer_version;  // 0 means no handshake yet
+  std::atomic<bool> first_message_after_handshake_processed;
 	// we add node to peerdb after first non-handshake message received to avoid adding seed nodes
 	const uint64_t my_unique_number;
 	CoreSyncData peer_sync_data;
-	uint64_t peer_unique_number = 0;
+  std::atomic<uint64_t> peer_unique_number;
 	Timestamp get_local_time() const;
 	static const std::map<std::pair<uint32_t, LevinProtocol::CommandType>, std::pair<LevinHandlerFunction, size_t>>
 	    before_handshake_handlers;
@@ -83,5 +84,7 @@ public:
 	static BinaryArray create_multicast_announce(const UUID &network_id, Hash genesis_bid, uint16_t p2p_external_port);
 	static uint16_t parse_multicast_announce(const unsigned char *data, size_t size, const UUID &network_id,
 	    Hash genesis_bid);  // returns port or 0 if failed to parse
+private:
+	static common::Mutex basic_mtx;
 };
 }  // namespace cn
