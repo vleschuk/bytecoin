@@ -4,6 +4,7 @@
 #include <atomic>
 #include "Network.hpp"
 #include "Time.hpp"
+#include "common/Lock.hpp"
 #include "common/MemoryStreams.hpp"
 #include "common/StringTools.hpp"
 #include "common/exception.hpp"
@@ -19,6 +20,7 @@
 #endif
 
 using namespace platform;
+using common::Mutex;
 
 static std::pair<bool, std::string> split_ssl_address(const std::string &addr) {
 	std::string stripped_addr = addr;
@@ -394,6 +396,7 @@ public:
 				<< ec << " " << ec.message() << std::endl;
 	}
 	void handle_connect(const boost::system::error_code &e) {
+		BC_CREATE_LOCK(lock, mtx, "connectlock");
 		if (!e) {
 			set_keepalive();
 //			std::cout << std::hex << "Socket handle_connect this=" << (size_t)this << " owner=" << (size_t)owner << "
@@ -418,6 +421,7 @@ public:
 		}
 	}
 	void start_read() {
+		BC_CREATE_LOCK(lock, mtx, "readlock");
 		if (incoming_buffer.full() || pending_read || !connected || !owner)
 			return;
 		pending_read = true;
@@ -452,6 +456,7 @@ public:
 	}
 
 	void start_write() {
+		BC_CREATE_LOCK(lock, mtx, "writelock");
 		if (pending_write || !connected || !owner)
 			return;
 		if (outgoing_buffer.empty()) {
@@ -504,6 +509,7 @@ public:
 		}
 	}
 #endif
+	Mutex mtx;
 };
 
 TCPSocket::TCPSocket(RW_handler &&rw_handler, D_handler &&d_handler)
