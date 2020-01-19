@@ -121,6 +121,7 @@ public:
 	std::vector<NetworkAddress> priority_nodes;
 	bool exclusive_nodes = false;  // if true, will connect to priority_nodes only
 	bool paranoid_checks = false;  // Check every byte of blockchain, even before last checkpoint
+	size_t nthreads = 1;
 	PublicKey trusted_public_key{};
 
 	std::string data_folder;

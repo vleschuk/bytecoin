@@ -38,7 +38,8 @@ Options:
   --import-blocks=<folder-path>          Perform import of blockchain from specified folder as blocks.bin and blockindexes.bin, then exit.
   --export-blocks=<folder-path>          Perform hot export of blockchain into specified folder as blocks.bin and blockindexes.bin, then exit. This overwrites existing files.
   --archive                              Work as an archive node [default: off].
-  --paranoid-checks                      Perform consensus checks for blocks in checkpoints range (very slow sync))";
+  --paranoid-checks                      Perform consensus checks for blocks in checkpoints range (very slow sync).
+  --threads=<number>                     Number of threads to use [default: 1].))";
 
 int main(int argc, const char *argv[]) try {
 	common::console::UnicodeConsoleSetup console_setup;
@@ -129,18 +130,13 @@ int main(int argc, const char *argv[]) try {
 	//	block_chain.test_undo_everything(1790000);
 	//	return 0;
 	boost::asio::io_service io;
-	platform::EventLoop run_loop(io);
+	platform::EventLoop run_loop(io, config.nthreads);
 
 	Node node(log_manager, config, block_chain);
 	const auto idea_ms =
 	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - idea_start);
 	std::cout << "bytecoind started seconds=" << double(idea_ms.count()) / 1000 << std::endl;
-	while (!io.stopped()) {
-		if (node.on_idle())  // Using it to load blockchain
-			io.poll();
-		else
-			io.run_one();
-	}
+	io.run();
 	return 0;
 } catch (const platform::ExclusiveLock::FailedToLock &ex) {
 	std::cout << "Bytecoind already running - " << common::what(ex) << std::endl;

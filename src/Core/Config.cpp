@@ -142,6 +142,9 @@ Config::Config(common::CommandLine &cmd)
 			    ConfigError(emsg));
 		}
 	}
+	if (const char *pa = cmd.get("--threads")) {
+		nthreads = common::integer_cast<size_t>(pa);
+	}
 	cmd.get_bool("--allow-local-ip", "Local IPs are automatically allowed for peers from the same private network");
 	parse_peer_and_add_to_container(cmd, seed_nodes, "--seed-node-address");
 	parse_peer_and_add_to_container(cmd, seed_nodes, "--seed-node", "Use --seed-node-address instead");

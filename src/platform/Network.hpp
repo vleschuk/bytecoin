@@ -232,7 +232,7 @@ private:
 namespace platform {
 class EventLoop : private common::Nocopy {  // enough wrappers! if boost, use no impl at all...
 public:
-	explicit EventLoop(boost::asio::io_service &io_service);
+	explicit EventLoop(boost::asio::io_service &io_service, size_t nthreads = 1);
 	~EventLoop();
 
 	static EventLoop *current() { return current_loop; }
@@ -246,8 +246,13 @@ public:
 	boost::asio::io_service &io() { return io_service; }
 
 private:
+	typedef std::shared_ptr<std::thread> ThreadPtr;
+	typedef std::vector<ThreadPtr> ThreadPool;
+
+private:
 	boost::asio::io_service &io_service;
-	static thread_local EventLoop *current_loop;
+	size_t nthreads;
+	static EventLoop *current_loop;
 };
 class SafeMessage : private common::Nocopy {
 public:
@@ -300,7 +305,10 @@ public:
 	virtual size_t write_some(const void *val, size_t count) override;
 	// writes 0..count-1, if returns 0 (outgoing buffer full) will fire rw_handler or d_handler in future
 	void shutdown_both();  // will fire d_handler only after all sent data is acknowledged or disconnect happens
+
+	boost::asio::io_service::strand &get_strand() { return strand; }
 private:
+	boost::asio::io_service::strand strand;
 	class Impl;
 	std::shared_ptr<Impl> impl;  // Owned by boost async machinery
 

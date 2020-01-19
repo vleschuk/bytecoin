@@ -144,7 +144,9 @@ void SafeMessage::fire() {
 }
 
 TCPSocket::TCPSocket(RW_handler rw_handler, D_handler d_handler)
-    : rw_handler(std::move(rw_handler)), d_handler(std::move(d_handler)) {}
+    : strand(EventLoop::current()->io())
+    , rw_handler(strand.wrap(std::move(rw_handler)))
+    , d_handler(strand.wrap(std::move(d_handler))) {}
 
 void TCPSocket::close() {
 	if (impl) {
@@ -401,6 +403,7 @@ void TCPSocket::write_callback(CFWriteStreamRef stream, CFStreamEventType event,
 #include <algorithm>
 #include <boost/array.hpp>
 #include <boost/asio.hpp>
+#include <boost/bind.hpp>
 #include <iostream>
 
 using namespace std::placeholders;  // We enjoy standard bindings
@@ -513,9 +516,11 @@ static void add_system_root_certs(ssl::context &ctx) {
 
 #endif
 
-thread_local EventLoop *EventLoop::current_loop = nullptr;
+EventLoop *EventLoop::current_loop = nullptr;
 
-EventLoop::EventLoop(boost::asio::io_service &io_service) : io_service(io_service) {
+EventLoop::EventLoop(boost::asio::io_service &io_service, size_t nthreads)
+	: io_service(io_service)
+	, nthreads(nthreads) {
 	if (current_loop)
 		throw std::logic_error("RunLoop::RunLoop Only single RunLoop per thread is allowed");
 	current_loop = this;
@@ -525,7 +530,19 @@ EventLoop::~EventLoop() { current_loop = nullptr; }
 
 void EventLoop::cancel() { io_service.stop(); }
 
-void EventLoop::run() { io_service.run(); }
+void EventLoop::run() {
+	ThreadPool threads;
+	for (size_t i = 0; i < nthreads; ++i) {
+		ThreadPtr t(new std::thread(
+					boost::bind(&boost::asio::io_service::run, &io_service)));
+		std::cout << "Created thread " << t->get_id() << std::endl;
+		threads.push_back(t);
+	}
+
+	for (auto t : threads) {
+		t->join();
+	}
+}
 void EventLoop::wake(std::function<void()> &&a_handler) { io_service.post(std::move(a_handler)); }
 
 class SafeMessage::Impl {
@@ -626,6 +643,7 @@ public:
 	    , pending_write(false)
 	    , pending_connect(false)
 	    , socket(EventLoop::current()->io())
+      , strand(owner->get_strand())
 	    , incoming_buffer(8192)
 	    , outgoing_buffer(8192) {
 		//		std::cout << std::hex << "TCPSocket::Impl this=" << (size_t)this << " owner=" << (size_t)owner <<
@@ -643,6 +661,7 @@ public:
 	bool pending_write;
 	bool pending_connect;
 	boost::asio::ip::tcp::socket socket;
+	boost::asio::io_service::strand &strand;
 #if platform_USE_SSL
 	std::shared_ptr<ssl::context> ssl_context;  // TCP socket may live longer than TCP acceptor
 	std::unique_ptr<SSLSocket> ssl_socket;
@@ -738,10 +757,12 @@ public:
 		        boost::asio::buffer(incoming_buffer.write_ptr2(), incoming_buffer.write_count2())}};
 #if platform_USE_SSL
 		if (ssl_socket)
-			ssl_socket->async_read_some(bufs, std::bind(&Impl::handle_read, owner->impl, _1, _2));
+			ssl_socket->async_read_some(bufs,
+					strand.wrap(std::bind(&Impl::handle_read, owner->impl, _1, _2)));
 		else
 #endif
-			socket.async_read_some(bufs, std::bind(&Impl::handle_read, owner->impl, _1, _2));
+			socket.async_read_some(bufs,
+					strand.wrap(std::bind(&Impl::handle_read, owner->impl, _1, _2)));
 	}
 
 	void handle_read(const boost::system::error_code &e, std::size_t bytes_transferred) {
@@ -777,10 +798,12 @@ public:
 		        boost::asio::buffer(outgoing_buffer.read_ptr2(), outgoing_buffer.read_count2())}};
 #if platform_USE_SSL
 		if (ssl_socket)
-			ssl_socket->async_write_some(bufs, std::bind(&Impl::handle_write, owner->impl, _1, _2));
+			ssl_socket->async_write_some(bufs,
+					strand.wrap(std::bind(&Impl::handle_write, owner->impl, _1, _2)));
 		else
 #endif
-			socket.async_write_some(bufs, std::bind(&Impl::handle_write, owner->impl, _1, _2));
+			socket.async_write_some(bufs,
+					strand.wrap(std::bind(&Impl::handle_write, owner->impl, _1, _2)));
 	}
 
 	void handle_write(const boost::system::error_code &e, std::size_t bytes_transferred) {
@@ -798,7 +821,8 @@ public:
 	}
 #if platform_USE_SSL
 	void start_handshake(ssl::stream_base::handshake_type type) {
-		ssl_socket->async_handshake(type, std::bind(&Impl::handle_handshake, this, _1));
+		ssl_socket->async_handshake(type,
+				strand.wrap(std::bind(&Impl::handle_handshake, this, _1)));
 	}
 	void handle_handshake(const boost::system::error_code &e) {
 		pending_connect = false;
@@ -819,7 +843,8 @@ public:
 };
 
 TCPSocket::TCPSocket(RW_handler &&rw_handler, D_handler &&d_handler)
-    : impl(std::make_shared<Impl>(this)), rw_handler(std::move(rw_handler)), d_handler(std::move(d_handler)) {}
+    : strand(EventLoop::current()->io()), impl(std::make_shared<Impl>(this)),
+		  rw_handler(std::move(rw_handler)), d_handler(std::move(d_handler)) {}
 
 TCPSocket::~TCPSocket() { close(); }
 
@@ -860,13 +885,15 @@ bool TCPSocket::connect(const std::string &addr, uint16_t port) {
 			if (!SSL_set_tlsext_host_name(impl->ssl_socket->native_handle(), ssl_addr.second.c_str()))
 				return false;
 			impl->ssl_socket->lowest_layer().async_connect(
-			    iter->endpoint(), std::bind(&TCPSocket::Impl::handle_connect, impl, _1));
+			    iter->endpoint(),
+					strand.wrap(std::bind(&TCPSocket::Impl::handle_connect, impl, _1)));
 #else
 			return false;
 #endif
 		} else {
 			boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(ssl_addr.second), port);
-			impl->socket.async_connect(endpoint, std::bind(&TCPSocket::Impl::handle_connect, impl, _1));
+			impl->socket.async_connect(endpoint,
+					strand.wrap(std::bind(&TCPSocket::Impl::handle_connect, impl, _1)));
 		}
 	} catch (const std::exception &) {
 		return false;
