@@ -24,12 +24,14 @@ void P2PProtocol::disconnect(const std::string &ban_reason) { return m_client->d
 void P2PProtocol::update_my_port(uint16_t port) { return m_client->update_my_port(port); }
 
 P2PClient::P2PClient(bool incoming, D_handler &&d_handler)
-    // sock constructor wraps these handlers in strand itself
-    : sock([this](bool canread, bool canwrite) { advance_state(true); },
-          std::bind(&P2PClient::on_socket_disconnect, this))
+    : sock()
     , incoming(incoming)
     , d_handler(std::move(d_handler))
-    , buffer(RECOMMENDED_BUFFER_SIZE) {}
+    , buffer(RECOMMENDED_BUFFER_SIZE) {
+	auto rw = [this](bool canread, bool canwrite) { advance_state(true); };
+	auto d = std::bind(&P2PClient::on_socket_disconnect, this);
+	sock.set_handlers(rw, d);
+}
 
 void P2PClient::set_protocol(std::unique_ptr<P2PProtocol> &&protocol) {
 	bool protocol_switch = protocol && m_protocol;
@@ -136,7 +138,9 @@ bool P2PClient::test_connect(const NetworkAddress &addr) {
 bool P2PClient::is_connected() const { return sock.is_open(); }
 
 void P2PClient::advance_state(bool called_from_runloop) {
+	static Mutex state_mtx;
 	try {
+		BC_CREATE_LOCK(lock, state_mtx, "state");
 		write();
 		if (responses.size() > 1)
 			return;  // keep outward queue busy with (one) response

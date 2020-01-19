@@ -294,8 +294,9 @@ public:
 	typedef std::function<void(bool can_read, bool can_write)> RW_handler;
 	typedef std::function<void(void)> D_handler;
 
-	explicit TCPSocket(RW_handler &&rw_handler, D_handler &&d_handler);
+	explicit TCPSocket(RW_handler &&rw_handler = [](bool, bool){}, D_handler &&d_handler = [](){});
 	~TCPSocket() override;
+	void set_handlers(RW_handler rw_handler, D_handler d_handler);
 	void close();          // after close you are guaranteed that no handlers will be called
 	bool is_open() const;  // Connecting or connected
 	bool connect(const std::string &addr, uint16_t port);

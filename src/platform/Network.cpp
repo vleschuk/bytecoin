@@ -845,9 +845,15 @@ public:
 
 TCPSocket::TCPSocket(RW_handler &&rw_handler, D_handler &&d_handler)
     : strand(EventLoop::current()->io()), impl(std::make_shared<Impl>(this)),
-		  rw_handler(std::move(rw_handler)), d_handler(std::move(d_handler)) {}
+		  rw_handler(strand.wrap(std::move(rw_handler))),
+		  d_handler(strand.wrap(std::move(d_handler))) {}
 
 TCPSocket::~TCPSocket() { close(); }
+
+void TCPSocket::set_handlers(RW_handler rw, D_handler d) {
+	rw_handler = strand.wrap(std::move(rw));
+	d_handler = strand.wrap(std::move(d));
+}
 
 void TCPSocket::close() { impl->close(false); }
 
