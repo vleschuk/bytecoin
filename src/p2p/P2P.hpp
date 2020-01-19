@@ -9,6 +9,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include "common/Lock.hpp"
 #include "common/MemoryStreams.hpp"
 #include "logging/LoggerMessage.hpp"
 #include "p2p/P2pProtocolTypes.hpp"
@@ -20,6 +21,8 @@ class Config;
 class P2P;
 class P2PClient;
 class PeerDB;
+
+using common::Mutex;
 
 class P2PProtocol {
 public:
@@ -112,9 +115,11 @@ private:
 	std::unique_ptr<platform::TCPAcceptor> la_socket;
 
 	// we index by bool incoming;
+	Mutex clients_mtx;
 	std::map<P2PClient *, std::unique_ptr<P2PClient>>
 	    clients[2];  // Alas, no way to look for an element in set<unique_ptr<_>>
 	std::unique_ptr<P2PClient> next_client[2];
+	Mutex disconnected_clients_mtx;
 	std::vector<std::unique_ptr<P2PClient>> disconnected_clients;  // lacking autorelease
 
 	platform::Timer reconnect_timer;

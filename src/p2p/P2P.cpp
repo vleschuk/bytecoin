@@ -24,6 +24,7 @@ void P2PProtocol::disconnect(const std::string &ban_reason) { return m_client->d
 void P2PProtocol::update_my_port(uint16_t port) { return m_client->update_my_port(port); }
 
 P2PClient::P2PClient(bool incoming, D_handler &&d_handler)
+    // sock constructor wraps these handlers in strand itself
     : sock([this](bool canread, bool canwrite) { advance_state(true); },
           std::bind(&P2PClient::on_socket_disconnect, this))
     , incoming(incoming)
@@ -173,8 +174,9 @@ void P2P::accept_all() {
 		if (!next_client[incoming]) {
 			next_client[incoming] =
 			    std::make_unique<P2PClient>(incoming, [](std::string ban_reason) {});  // We do not know Client * yet
+			auto &strand = next_client[incoming]->sock.get_strand();
 			next_client[incoming]->d_handler =
-			    std::bind(&P2P::on_client_disconnected, this, next_client[incoming].get(), _1);
+			    strand.wrap(std::bind(&P2P::on_client_disconnected, this, next_client[incoming].get(), _1));
 		}
 		std::string addr;
 		if (!la_socket->accept(next_client[incoming]->sock, addr))
@@ -201,12 +203,14 @@ void P2P::accept_all() {
 }
 
 bool P2P::connect_one(const NetworkAddress &address) {
+	BC_CREATE_LOCK(lock, clients_mtx, "clients");
 	const bool incoming = false;
 	if (!next_client[incoming]) {
 		next_client[incoming] =
 		    std::make_unique<P2PClient>(incoming, [](std::string ban_reason) {});  // We do not know Client * yet
+		auto &strand = next_client[incoming]->sock.get_strand();
 		next_client[incoming]->d_handler =
-		    std::bind(&P2P::on_client_disconnected, this, next_client[incoming].get(), _1);
+		    strand.wrap(std::bind(&P2P::on_client_disconnected, this, next_client[incoming].get(), _1));
 	}
 	if (!next_client[incoming]->sock.connect(common::ip_address_to_string(address.ip), address.port)) {
 		return false;
