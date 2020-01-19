@@ -145,14 +145,7 @@ int main(int argc, const char *argv[]) try {
 	std::cout << "bytecoind started seconds=" << double(idea_ms.count()) / 1000 << std::endl;
 	std::cout << "threads: " << config.nthreads << std::endl;
 	run_loop.run();
-	/*
-	while (!io.stopped()) {
-		if (node.on_idle())  // Using it to load blockchain
-			io.poll();
-		else
-			io.run_one();
-	}
-	*/
+	run_loop.cancel();
 	return 0;
 } catch (const platform::ExclusiveLock::FailedToLock &ex) {
 	std::cout << "Bytecoind already running - " << common::what(ex) << std::endl;

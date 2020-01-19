@@ -252,6 +252,7 @@ private:
 private:
 	boost::asio::io_service &io_service;
 	size_t nthreads;
+	ThreadPool threads;
 	static EventLoop *current_loop;
 };
 class SafeMessage : private common::Nocopy {

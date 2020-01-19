@@ -528,21 +528,22 @@ EventLoop::EventLoop(boost::asio::io_service &io_service, size_t nthreads)
 
 EventLoop::~EventLoop() { current_loop = nullptr; }
 
-void EventLoop::cancel() { io_service.stop(); }
+void EventLoop::cancel() {
+	//io_service.stop();
+	for (auto t : threads) {
+		t->join();
+	}
+}
 
 void EventLoop::run() {
-	ThreadPool threads;
 	for (size_t i = 0; i < nthreads; ++i) {
 		ThreadPtr t(new std::thread(
 					boost::bind(&boost::asio::io_service::run, &io_service)));
 		std::cout << "Created thread " << t->get_id() << std::endl;
 		threads.push_back(t);
 	}
-
-	for (auto t : threads) {
-		t->join();
-	}
 }
+
 void EventLoop::wake(std::function<void()> &&a_handler) { io_service.post(std::move(a_handler)); }
 
 class SafeMessage::Impl {
