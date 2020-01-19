@@ -24,6 +24,8 @@
 
 using namespace cn;
 
+Mutex Node::chain_blocks_mtx;
+
 Node::Node(logging::ILogger &log, const Config &config, BlockChainState &block_chain)
     : m_block_chain(block_chain)
     , m_config(config)
@@ -89,6 +91,7 @@ void Node::db_commit() {
 }
 
 void Node::remove_chain_block(std::map<Hash, DownloadInfo>::iterator it) {
+	BC_CREATE_LOCK(lock, chain_blocks_mtx, "chain_blocks");
 	invariant(it->second.chain_counter > 0, "");
 	it->second.chain_counter -= 1;
 	if (it->second.chain_counter == 0 && !it->second.preparing)

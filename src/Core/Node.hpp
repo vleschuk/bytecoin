@@ -6,6 +6,7 @@
 #include <functional>
 #include <iostream>
 #include "BlockChainState.hpp"
+#include "common/Lock.hpp"
 #include "http/BinaryRpc.hpp"
 #include "http/JsonRpc.hpp"
 #include "p2p/P2P.hpp"
@@ -20,7 +21,7 @@ namespace platform {
 class PreventSleep;
 }
 namespace cn {
-
+using common::Mutex;
 class Node {
 public:
 	typedef std::function<bool(Node *, http::Client *, http::RequestBody &&, json_rpc::Request &&, std::string &)>
@@ -122,6 +123,7 @@ protected:
 		Height expected_height               = 0;  // Set during download
 		bool preparing                       = false;
 	};
+	static Mutex chain_blocks_mtx;
 	std::map<Hash, DownloadInfo> chain_blocks;
 	void remove_chain_block(std::map<Hash, DownloadInfo>::iterator it);
 	std::map<Hash, P2PProtocolBytecoin *> downloading_transactions;
