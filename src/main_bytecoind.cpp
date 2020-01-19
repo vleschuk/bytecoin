@@ -136,7 +136,16 @@ int main(int argc, const char *argv[]) try {
 	const auto idea_ms =
 	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - idea_start);
 	std::cout << "bytecoind started seconds=" << double(idea_ms.count()) / 1000 << std::endl;
-	io.run();
+	std::cout << "threads: " << config.nthreads << std::endl;
+	run_loop.run();
+	/*
+	while (!io.stopped()) {
+		if (node.on_idle())  // Using it to load blockchain
+			io.poll();
+		else
+			io.run_one();
+	}
+	*/
 	return 0;
 } catch (const platform::ExclusiveLock::FailedToLock &ex) {
 	std::cout << "Bytecoind already running - " << common::what(ex) << std::endl;
