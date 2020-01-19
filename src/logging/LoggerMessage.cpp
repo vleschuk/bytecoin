@@ -2,6 +2,7 @@
 // Licensed under the GNU Lesser General Public License. See LICENSE for details.
 
 #include "LoggerMessage.hpp"
+#include <thread>
 
 namespace logging {
 
@@ -13,7 +14,7 @@ LoggerMessage::LoggerMessage(ILogger &logger, const std::string &category, Level
 
 LoggerMessage::~LoggerMessage() {
 	if (!str().empty())
-		(*this) << std::endl;
+		(*this) << " thread " << std::this_thread::get_id()  << std::endl;
 }
 
 LoggerMessage::LoggerMessage(LoggerMessage &&other)
