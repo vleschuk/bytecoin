@@ -60,11 +60,13 @@ PeerDB::PeerDB(logging::ILogger &log, const Config &config, const std::string &d
 }
 
 void PeerDB::db_commit() {
+	BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	db.commit_db_txn();
 	commit_timer.once(float(config.db_commit_period_peers));
 }
 
 void PeerDB::read_db(const std::string &prefix, peers_indexed &list) {
+	BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	list.clear();
 	for (auto db_cur = db.begin(prefix); !db_cur.end(); db_cur.next()) {
 		Entry peer{};
@@ -86,7 +88,7 @@ void PeerDB::del_db(const std::string &prefix, const NetworkAddress &addr) {
 }
 
 void PeerDB::print() {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	auto &by_time_index = whitelist.get<by_addr>();
 	for (auto it = by_time_index.begin(); it != by_time_index.end(); ++it) {
 		std::string a = common::ip_address_and_port_to_string(it->address.ip, it->address.port);
@@ -102,18 +104,18 @@ void PeerDB::trim(Timestamp now) {
 }
 
 size_t PeerDB::get_gray_size() const {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	auto &by_time_index = graylist.get<by_addr>();
 	return by_time_index.size();
 }
 size_t PeerDB::get_white_size() const {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	auto &by_time_index = whitelist.get<by_addr>();
 	return by_time_index.size();
 }
 
 std::vector<PeerlistEntry> PeerDB::get_peer_list(const peers_indexed &list) const {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	std::vector<PeerlistEntry> result;
 	auto &by_nca_index = list.get<by_next_connection_attempt>();
 	for (auto it = by_nca_index.begin(); it != by_nca_index.end(); ++it) {
@@ -159,7 +161,7 @@ void PeerDB::unban(const std::string &prefix, Timestamp now, peers_indexed &list
 }
 
 std::vector<NetworkAddress> PeerDB::get_peerlist_to_p2p(const NetworkAddress &for_addr, Timestamp now, size_t depth) {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	std::vector<NetworkAddress> bs_head;
 	unban(now);
 	auto &by_time_index     = whitelist.get<by_ban_until>();
@@ -184,7 +186,7 @@ std::vector<NetworkAddress> PeerDB::get_peerlist_to_p2p(const NetworkAddress &fo
 std::vector<PeerlistEntryLegacy> PeerDB::get_peerlist_to_p2p_legacy(const NetworkAddress &for_addr,
     Timestamp now,
     size_t depth) {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	std::vector<PeerlistEntryLegacy> bs_head;
 	unban(now);
 	auto &by_time_index     = whitelist.get<by_ban_until>();
@@ -278,7 +280,7 @@ bool PeerDB::add_incoming_peer_impl(const NetworkAddress &addr, Timestamp now) {
 }
 
 PeerDB::Entry PeerDB::get_entry_from_lists(const NetworkAddress &addr) const {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	auto &gray_by_addr_index = graylist.get<by_addr>();
 	auto git                 = gray_by_addr_index.find(addr);
 	if (git != gray_by_addr_index.end())
@@ -352,7 +354,7 @@ void PeerDB::set_peer_just_seen(PeerIdType peer_id,
 }
 
 void PeerDB::delay_connection_attempt(const NetworkAddress &addr, Timestamp now) {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	// Used by downloader for slackers and to advance connect attempt for seeds
 	// We delay slackers always by priority reconnect (even if they are not priority)
 	update_lists(addr, [&](Entry &entry) {
@@ -363,7 +365,7 @@ void PeerDB::delay_connection_attempt(const NetworkAddress &addr, Timestamp now)
 }
 
 void PeerDB::set_peer_banned(const NetworkAddress &addr, const std::string &ban_reason, Timestamp now) {
-	BC_CREATE_LOCK(lock, DB_mutex, "DB");
+	//BC_CREATE_LOCK(lock, DB_mutex, "DB");
 	m_log(logging::INFO) << "PeerDB peer " << addr << " banned, reason= " << ban_reason;
 	update_lists(addr, [&](Entry &entry) {
 		entry.ban_reason = ban_reason;
