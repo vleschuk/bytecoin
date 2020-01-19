@@ -202,6 +202,7 @@ void P2PProtocolBasic::msg_timed_sync(p2p::TimedSync::Notify &&req) {
 void P2PProtocolBasic::msg_timed_sync(p2p::TimedSync::Response &&req) {}
 
 void P2PProtocolBasic::on_request_ready(BinaryArray &&header, BinaryArray &&body) {
+	static Mutex after_handshake;
 	try {
 		no_incoming_timer.once(float(config.p2p_no_incoming_message_disconnect_timeout));
 		on_msg_bytes(header.size() + body.size(), 0);
@@ -219,6 +220,7 @@ void P2PProtocolBasic::on_request_ready(BinaryArray &&header, BinaryArray &&body
 		}
 		auto ha = after_handshake_handlers.find({command, command_type});
 		if (ha != after_handshake_handlers.end()) {
+			BC_CREATE_LOCK(lock, after_handshake, "after_handshake");
 			if (!first_message_after_handshake_processed) {
 				first_message_after_handshake_processed = true;
 				on_first_message_after_handshake();
