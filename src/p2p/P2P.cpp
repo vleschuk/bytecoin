@@ -161,6 +161,7 @@ void P2PClient::advance_state(bool called_from_runloop) {
 void P2PClient::on_socket_disconnect() { disconnect(std::string{}); }
 
 void P2P::on_client_disconnected(P2PClient *who, std::string ban_reason) {
+	BC_CREATE_LOCK(lock, disconnected_clients_mtx, "disconnected_clients");
 	if (!ban_reason.empty())
 		peers.set_peer_banned(who->get_address(), ban_reason, get_local_time());
 	const bool incoming = who->is_incoming();
@@ -281,7 +282,10 @@ P2P::P2P(logging::ILogger &log, const Config &config, PeerDB &peers, client_fact
     , peers(peers)
     , m_log_banned_timestamp(std::chrono::steady_clock::now())
     , reconnect_timer(std::bind(&P2P::connect_all_nodelay, this))
-    , free_disconnected_timer([&]() { disconnected_clients.clear(); })
+    , free_disconnected_timer([&]() {
+        BC_CREATE_LOCK(lock, disconnected_clients_mtx, "disconnected_clients");
+        disconnected_clients.clear();
+      })
     , c_factory(std::move(c_factory))
     , unique_number(crypto::rand<uint64_t>()) {
 	try {
