@@ -91,8 +91,9 @@ private:
 
 	common::CircularBuffer buffer;
 
+	Mutex responses_mtx;
 	std::deque<common::VectorStream> responses;
-	bool waiting_shutdown = false;
+	std::atomic<bool> waiting_shutdown;
 };
 
 class P2P {

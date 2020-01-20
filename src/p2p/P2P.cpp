@@ -27,7 +27,8 @@ P2PClient::P2PClient(bool incoming, D_handler &&d_handler)
     : sock()
     , incoming(incoming)
     , d_handler(std::move(d_handler))
-    , buffer(RECOMMENDED_BUFFER_SIZE) {
+    , buffer(RECOMMENDED_BUFFER_SIZE)
+    , waiting_shutdown(false) {
 	auto rw = [this](bool canread, bool canwrite) { advance_state(true); };
 	auto d = std::bind(&P2PClient::on_socket_disconnect, this);
 	sock.set_handlers(rw, d);
@@ -46,12 +47,17 @@ void P2PClient::set_protocol(std::unique_ptr<P2PProtocol> &&protocol) {
 }
 
 void P2PClient::write() {
-	while (!responses.empty()) {
+	while (true) {
+		BC_CREATE_LOCK(lock, responses_mtx, "responses_send");
+		if (responses.empty()) {
+				break;
+		}
 		responses.front().copy_to(sock);
 		if (!responses.front().empty())
 			break;
 		responses.pop_front();
 	}
+	BC_CREATE_LOCK(lock, responses_mtx, "responses_shutdown");
 	if (responses.empty() && waiting_shutdown)
 		sock.shutdown_both();
 }
@@ -102,6 +108,7 @@ bool P2PClient::read_next_request(BinaryArray &header, BinaryArray &body) {
 }
 
 void P2PClient::send(BinaryArray &&body) {
+	BC_CREATE_LOCK(lock, responses_mtx, "responses_emplace");
 	responses.emplace_back(std::move(body));
 
 	write();
